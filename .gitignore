@@ -1,0 +1,7 @@
+venv/
+# Environment Variables
+.env
+backend/.env
+**/.env.local
+**/.env.*.local
+frontend/

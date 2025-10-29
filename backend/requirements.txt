@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic
+motor        # async MongoDB
+httpx
+selenium
+python-dotenv
+networkx
+uvicorn
+python-multipart
+webdriver-manager

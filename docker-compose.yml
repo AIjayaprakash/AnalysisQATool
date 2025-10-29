@@ -1,0 +1,40 @@
+version: "3.8"
+services:
+  mongo:
+    image: mongo:6
+    container_name: selenium_mcp_mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  selenium:
+    image: selenium/standalone-chrome:115.0
+    container_name: selenium
+    shm_size: "2g"
+    ports:
+      - "4444:4444"
+
+  backend:
+    build:
+      context: ./backend
+    container_name: selenium_mcp_backend
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - mongo
+      - selenium
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: selenium_mcp_frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+volumes:
+  mongo_data:
