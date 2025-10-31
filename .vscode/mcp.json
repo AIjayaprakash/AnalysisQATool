@@ -1,8 +1,11 @@
 {
   "servers": {
-    "selenium": {
+    "playwright": {
       "command": "npx",
-      "args": ["-y", "@angiejones/mcp-selenium"]
+      "args": [
+        "-y",
+        "@playwright/mcp"
+      ]
     }
   }
-}
+}  
