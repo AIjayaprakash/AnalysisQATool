@@ -1,0 +1,696 @@
+"""
+Complete LangGraph Playwright Automation Agent - Direct Playwright Integration
+Uses Playwright framework directly (not MCP) for web automation testing.
+
+This agent creates custom LangGraph tools that use Playwright directly,
+allowing for visible browser automation without VS Code MCP dependency.
+"""
+
+import os
+import json
+import asyncio
+from typing import Dict, List, Any, Annotated, TypedDict, Optional
+from datetime import datetime
+from dotenv import load_dotenv
+load_dotenv()
+
+# LangGraph and LangChain imports
+from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolNode
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
+from langchain_core.tools import tool
+from pydantic import BaseModel, Field
+
+# Playwright imports
+from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+
+print("[OK] Direct Playwright LangGraph Agent - Standalone Playwright Integration")
+print("  This agent uses Playwright framework directly for visible browser automation")
+
+# Global browser state management
+class PlaywrightState:
+    def __init__(self):
+        self.playwright = None
+        self.browser: Optional[Browser] = None
+        self.context: Optional[BrowserContext] = None
+        self.page: Optional[Page] = None
+        self.is_initialized = False
+    
+    async def initialize(self, headless: bool = False, browser_type: str = "chromium"):
+        """Initialize Playwright browser"""
+        if self.is_initialized:
+            return
+        
+        self.playwright = await async_playwright().start()
+        
+        # Launch browser based on type
+        if browser_type == "firefox":
+            self.browser = await self.playwright.firefox.launch(headless=headless)
+        elif browser_type == "webkit":
+            self.browser = await self.playwright.webkit.launch(headless=headless)
+        else:  # chromium (default)
+            self.browser = await self.playwright.chromium.launch(headless=headless)
+        
+        self.context = await self.browser.new_context()
+        self.page = await self.context.new_page()
+        self.is_initialized = True
+        
+        print(f"[BROWSER] Launched {browser_type} browser (headless={headless})")
+    
+    async def cleanup(self):
+        """Clean up browser resources"""
+        if self.page:
+            await self.page.close()
+        if self.context:
+            await self.context.close()  
+        if self.browser:
+            await self.browser.close()
+        if self.playwright:
+            await self.playwright.stop()
+        
+        self.is_initialized = False
+        print("[BROWSER] Cleaned up browser resources")
+
+# Global playwright state
+pw_state = PlaywrightState()
+
+# Agent State
+class AgentState(TypedDict):
+    messages: List[BaseMessage]
+    test_plan: str
+    current_step: int
+    total_steps: int
+    results: List[Dict[str, Any]]
+    errors: List[str]
+    is_complete: bool
+    max_iterations: int
+    browser_config: Dict[str, Any]
+
+# Custom Playwright Tools using @tool decorator
+@tool
+async def playwright_navigate(url: str) -> str:
+    """Navigate browser to a URL. This will open a visible browser window.
+    
+    Args:
+        url: The full URL to navigate to (e.g., https://example.com)
+    """
+    try:
+        # Initialize browser if not already done
+        if not pw_state.is_initialized:
+            await pw_state.initialize(headless=False)  # Visible browser
+        
+        await pw_state.page.goto(url)
+        title = await pw_state.page.title()
+        
+        return f"✅ Successfully navigated to {url} - Page title: '{title}'"
+    except Exception as e:
+        return f"❌ Failed to navigate to {url}: {str(e)}"
+
+@tool
+async def playwright_click(selector: str, element_description: str = "") -> str:
+    """Click an element on the page.
+    
+    Args:
+        selector: CSS selector, text selector, or xpath for the element
+        element_description: Human readable description of the element (optional)
+    """
+    try:
+        if not pw_state.is_initialized:
+            return "❌ Browser not initialized. Please navigate to a page first."
+        
+        # Handle different selector types
+        if selector.startswith("text="):
+            await pw_state.page.click(selector)
+        elif selector.startswith("//"):
+            await pw_state.page.click(f"xpath={selector}")
+        else:
+            await pw_state.page.click(selector)
+        
+        desc = f" ({element_description})" if element_description else ""
+        return f"✅ Successfully clicked element: {selector}{desc}"
+    except Exception as e:
+        return f"❌ Failed to click element {selector}: {str(e)}"
+
+@tool
+async def playwright_type(selector: str, text: str, element_description: str = "") -> str:
+    """Type text into an input field.
+    
+    Args:
+        selector: CSS selector for the input element
+        text: Text to type into the field
+        element_description: Human readable description of the field (optional)
+    """
+    try:
+        if not pw_state.is_initialized:
+            return "❌ Browser not initialized. Please navigate to a page first."
+        
+        await pw_state.page.fill(selector, text)
+        
+        desc = f" ({element_description})" if element_description else ""
+        return f"✅ Successfully typed '{text}' into {selector}{desc}"
+    except Exception as e:
+        return f"❌ Failed to type into {selector}: {str(e)}"
+
+@tool
+async def playwright_screenshot(filename: str = "screenshot.png") -> str:
+    """Take a screenshot of the current page.
+    
+    Args:
+        filename: Filename to save screenshot (defaults to screenshot.png)
+    """
+    try:
+        if not pw_state.is_initialized:
+            return "❌ Browser not initialized. Please navigate to a page first."
+        
+        screenshot_path = os.path.join(os.getcwd(), filename)
+        await pw_state.page.screenshot(path=screenshot_path)
+        
+        return f"✅ Screenshot saved to: {screenshot_path}"
+    except Exception as e:
+        return f"❌ Failed to take screenshot: {str(e)}"
+
+@tool
+async def playwright_wait_for_selector(selector: str, timeout: int = 5000) -> str:
+    """Wait for an element to appear on the page.
+    
+    Args:
+        selector: CSS selector to wait for
+        timeout: Timeout in milliseconds (default: 5000)
+    """
+    try:
+        if not pw_state.is_initialized:
+            return "❌ Browser not initialized. Please navigate to a page first."
+        
+        await pw_state.page.wait_for_selector(selector, timeout=timeout)
+        return f"✅ Element {selector} appeared on page"
+    except Exception as e:
+        return f"❌ Element {selector} did not appear within {timeout}ms: {str(e)}"
+
+@tool
+async def playwright_wait_for_text(text: str, timeout: int = 5000) -> str:
+    """Wait for specific text to appear on the page.
+    
+    Args:
+        text: Text to wait for
+        timeout: Timeout in milliseconds (default: 5000)
+    """
+    try:
+        if not pw_state.is_initialized:
+            return "❌ Browser not initialized. Please navigate to a page first."
+        
+        await pw_state.page.wait_for_selector(f"text={text}", timeout=timeout)
+        return f"✅ Text '{text}' appeared on page"
+    except Exception as e:
+        return f"❌ Text '{text}' did not appear within {timeout}ms: {str(e)}"
+
+@tool
+async def playwright_get_page_content() -> str:
+    """Get the current page content and structure.
+    """
+    try:
+        if not pw_state.is_initialized:
+            return "❌ Browser not initialized. Please navigate to a page first."
+        
+        title = await pw_state.page.title()
+        url = pw_state.page.url
+        
+        # Get some basic page info
+        content = await pw_state.page.evaluate("""
+            () => {
+                const headings = Array.from(document.querySelectorAll('h1, h2, h3')).slice(0, 5).map(h => h.textContent.trim());
+                const links = Array.from(document.querySelectorAll('a')).slice(0, 10).map(a => ({text: a.textContent.trim(), href: a.href}));
+                const inputs = Array.from(document.querySelectorAll('input, textarea')).slice(0, 5).map(i => ({type: i.type, placeholder: i.placeholder, name: i.name}));
+                
+                return {
+                    headings,
+                    links: links.filter(l => l.text),
+                    inputs
+                };
+            }
+        """)
+        
+        result = f"📄 Page Info:\n"
+        result += f"  Title: {title}\n"
+        result += f"  URL: {url}\n"
+        
+        if content['headings']:
+            result += f"  Headings: {', '.join(content['headings'][:3])}\n"
+        
+        if content['links']:
+            result += f"  Links found: {len(content['links'])}\n"
+        
+        if content['inputs']:
+            result += f"  Input fields: {len(content['inputs'])}\n"
+        
+        return result
+    except Exception as e:
+        return f"❌ Failed to get page content: {str(e)}"
+
+@tool
+async def playwright_execute_javascript(script: str) -> str:
+    """Execute JavaScript code in the browser context.
+    
+    Args:
+        script: JavaScript code to execute
+    """
+    try:
+        if not pw_state.is_initialized:
+            return "❌ Browser not initialized. Please navigate to a page first."
+        
+        result = await pw_state.page.evaluate(script)
+        return f"✅ JavaScript executed. Result: {result}"
+    except Exception as e:
+        return f"❌ Failed to execute JavaScript: {str(e)}"
+
+@tool 
+async def playwright_close_browser() -> str:
+    """Close the browser and clean up resources."""
+    try:
+        await pw_state.cleanup()
+        return "✅ Browser closed successfully"
+    except Exception as e:
+        return f"❌ Failed to close browser: {str(e)}"
+
+# Collect all tools
+playwright_tools = [
+    playwright_navigate,
+    playwright_click,
+    playwright_type,
+    playwright_screenshot,
+    playwright_wait_for_selector,
+    playwright_wait_for_text,
+    playwright_get_page_content,
+    playwright_execute_javascript,
+    playwright_close_browser,
+]
+
+print(f"[OK] Created {len(playwright_tools)} Playwright automation tools")
+
+# LLM Setup - Try OpenAI first, fallback to Groq
+try:
+    from langchain_openai import ChatOpenAI
+    if os.getenv("OPENAI_API_KEY"):
+        print("[INFO] Using OpenAI GPT-4 (best tool calling support)")
+        llm = ChatOpenAI(model="gpt-4", temperature=0)
+        llm_with_tools = llm.bind_tools(playwright_tools)
+    else:
+        raise ImportError("No OpenAI API key")
+except (ImportError, Exception):
+    print("[INFO] Using Groq with custom function calling")
+    from langchain_groq import ChatGroq
+    if not os.getenv("GROQ_API_KEY"):
+        print("Warning: GROQ_API_KEY not set. The agent will not work without a valid API key.")
+    os.environ["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY", "dummy-key")
+    
+    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+    llm_with_tools = llm
+
+# Agent Nodes
+def parse_test_request(state: AgentState) -> AgentState:
+    """Parse user's test request and create execution plan"""
+    messages = state["messages"]
+    
+    # Check if using OpenAI or Groq
+    using_openai = hasattr(llm_with_tools, 'bound_tools') and llm_with_tools.bound_tools
+    
+    if using_openai:
+        system_prompt = """You are an expert QA automation engineer using Playwright for web automation.
+
+CRITICAL: You MUST use the available Playwright tools to execute tests. The browser will be VISIBLE during automation.
+
+Available Playwright tools (use function calls):
+- playwright_navigate(url) - Navigate to a website (opens visible browser)
+- playwright_click(selector, element_description) - Click elements
+- playwright_type(selector, text, element_description) - Type into input fields
+- playwright_screenshot(filename) - Take screenshots
+- playwright_wait_for_selector(selector, timeout) - Wait for elements
+- playwright_wait_for_text(text, timeout) - Wait for text to appear
+- playwright_get_page_content() - Get page structure and content
+- playwright_execute_javascript(script) - Run JavaScript
+- playwright_close_browser() - Close browser when done
+
+EXECUTION RULES:
+1. ALWAYS start by calling playwright_navigate to open the target website
+2. Use function calls to execute tools - the browser will be visible
+3. Take screenshots to document the automation steps
+4. Use playwright_get_page_content() to understand page structure
+5. Always close the browser when the test is complete
+
+REMEMBER: Use function calls to perform actual automation with visible browser!"""
+    else:
+        system_prompt = """You are an expert QA automation engineer using Playwright for web automation.
+
+CRITICAL: You MUST specify Playwright actions using the TOOL_CALL format below. The browser will be VISIBLE.
+
+Available Playwright tools:
+- playwright_navigate(url) - Navigate to a website (opens visible browser)
+- playwright_click(selector, element_description) - Click elements  
+- playwright_type(selector, text, element_description) - Type into input fields
+- playwright_screenshot(filename) - Take screenshots
+- playwright_wait_for_selector(selector, timeout) - Wait for elements
+- playwright_wait_for_text(text, timeout) - Wait for text to appear
+- playwright_get_page_content() - Get page structure and content
+- playwright_execute_javascript(script) - Run JavaScript
+- playwright_close_browser() - Close browser when done
+
+EXECUTION FORMAT:
+Use this exact format to call tools:
+
+TOOL_CALL: playwright_navigate
+ARGS: {"url": "https://example.com"}
+
+TOOL_CALL: playwright_screenshot
+ARGS: {"filename": "step1.png"}
+
+EXECUTION RULES:
+1. ALWAYS start with TOOL_CALL: playwright_navigate
+2. Use the exact TOOL_CALL format shown above
+3. After tool results, evaluate if more steps are needed
+4. Always close browser when complete: TOOL_CALL: playwright_close_browser
+
+REMEMBER: Use TOOL_CALL format for actions - browser will be visible!"""
+    
+    # Build messages based on current step
+    if state["current_step"] == 0:
+        planning_messages = [
+            SystemMessage(content=system_prompt),
+            *messages,
+            HumanMessage(content="""Create and execute a detailed test plan using the Playwright tools.
+
+IMPORTANT: 
+- The browser will be VISIBLE during automation so you can see what's happening
+- Start by calling playwright_navigate to open the target website
+- Use playwright_get_page_content() to understand page structure
+- Take screenshots to document steps
+- Close the browser when done
+
+Execute the test now using tool calls.""")
+        ]
+    else:
+        planning_messages = [
+            SystemMessage(content=system_prompt),
+            *messages,
+            HumanMessage(content="Based on the results above, determine next steps. If test is complete, close the browser and provide summary. Otherwise, continue with tool calls.")
+        ]
+    
+    response = llm_with_tools.invoke(planning_messages)
+    state["messages"].append(response)
+    return state
+
+async def execute_tools(state: AgentState) -> AgentState:
+    """Execute tool calls from the LLM response"""
+    last_message = state["messages"][-1]
+    
+    # Handle OpenAI function calls
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        tool_call_names = [tc.get("name", "unknown") for tc in last_message.tool_calls]
+        print(f"  -> Step {state['current_step']}: Executing {len(last_message.tool_calls)} Playwright tool(s): {', '.join(tool_call_names)}")
+        
+        # Execute tools using ToolNode
+        tool_node = ToolNode(playwright_tools)
+        result = await tool_node.ainvoke({"messages": [last_message]})
+        
+        state["messages"].extend(result["messages"])
+        state["results"].append({
+            "step": state["current_step"],
+            "tool_calls": len(last_message.tool_calls),
+            "tool_names": tool_call_names,
+            "timestamp": datetime.now().isoformat()
+        })
+        state["current_step"] += 1
+        
+    else:
+        # Parse Groq manual format
+        content = str(last_message.content) if hasattr(last_message, 'content') else ""
+        
+        import re
+        import json
+        
+        tool_calls = []
+        pattern = r'TOOL_CALL:\s*([^\n]+)\s*\nARGS:\s*(\{[^}]*\})'
+        matches = re.findall(pattern, content, re.MULTILINE | re.DOTALL)
+        
+        for tool_name, args_str in matches:
+            tool_name = tool_name.strip()
+            try:
+                args = json.loads(args_str) if args_str.strip() else {}
+                tool_calls.append({"name": tool_name, "args": args})
+            except json.JSONDecodeError:
+                print(f"[ERROR] Failed to parse args for {tool_name}: {args_str}")
+                continue
+        
+        if tool_calls:
+            tool_call_names = [tc["name"] for tc in tool_calls]
+            print(f"  -> Step {state['current_step']}: Executing {len(tool_calls)} Playwright tool(s): {', '.join(tool_call_names)}")
+            
+            tool_results = []
+            
+            for tool_call in tool_calls:
+                tool_name = tool_call["name"]
+                args = tool_call["args"]
+                
+                # Find and execute the actual tool
+                tool_func = None
+                for tool in playwright_tools:
+                    if tool.name == tool_name:
+                        tool_func = tool
+                        break
+                
+                if tool_func:
+                    try:
+                        # Execute the async tool function
+                        result = await tool_func.ainvoke(args)
+                        tool_results.append(f"✅ {tool_name}: {result}")
+                    except Exception as e:
+                        tool_results.append(f"❌ {tool_name}: Error - {str(e)}")
+                else:
+                    tool_results.append(f"❌ {tool_name}: Tool not found")
+            
+            # Create result message
+            combined_result = "Tool execution results:\n" + "\n".join(tool_results)
+            result_message = AIMessage(content=combined_result)
+            
+            state["messages"].append(result_message)
+            state["results"].append({
+                "step": state["current_step"],
+                "tool_calls": len(tool_calls),
+                "tool_names": tool_call_names,
+                "timestamp": datetime.now().isoformat()
+            })
+            state["current_step"] += 1
+        else:
+            state["is_complete"] = True
+    
+    # Check iteration limit
+    if state["current_step"] >= state["max_iterations"]:
+        state["is_complete"] = True
+        state["errors"].append(f"Max iterations ({state['max_iterations']}) reached")
+    
+    return state
+
+def should_continue(state: AgentState) -> str:
+    """Determine if we should continue or end"""
+    
+    print(f"\n[DEBUG] should_continue - Step {state['current_step']}, Complete: {state.get('is_complete')}")
+    
+    if state.get("is_complete"):
+        print("[DEBUG] -> END (marked complete)")
+        return END
+    
+    if state["current_step"] >= state["max_iterations"]:
+        print("[DEBUG] -> END (max iterations)")
+        return END
+    
+    last_message = state["messages"][-1]
+    print(f"[DEBUG] Last message type: {type(last_message).__name__}")
+    
+    # Check for tool calls
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        print(f"[DEBUG] -> execute_tools ({len(last_message.tool_calls)} tool calls)")
+        return "execute_tools"
+    
+    # Check for Groq format
+    if hasattr(last_message, 'content'):
+        content = str(last_message.content)
+        if "TOOL_CALL:" in content:
+            print("[DEBUG] -> execute_tools (manual format)")
+            return "execute_tools"
+    
+    # Continue after tool results
+    if isinstance(last_message, ToolMessage):
+        print("[DEBUG] -> parse_request (after tool response)")
+        return "parse_request"
+    
+    if isinstance(last_message, AIMessage) and "Tool execution results:" in str(last_message.content):
+        print("[DEBUG] -> parse_request (after tool results)")
+        return "parse_request"
+    
+    print("[DEBUG] -> END (no tool calls)")
+    return END
+
+def create_playwright_agent():
+    """Create the LangGraph Playwright automation agent"""
+    workflow = StateGraph(AgentState)
+    
+    # Add nodes
+    workflow.add_node("parse_request", parse_test_request)
+    workflow.add_node("execute_tools", execute_tools)
+    
+    # Set entry point
+    workflow.set_entry_point("parse_request")
+    
+    # Add conditional edges
+    workflow.add_conditional_edges(
+        "parse_request",
+        should_continue,
+        {
+            "execute_tools": "execute_tools",
+            "parse_request": "parse_request",
+            END: END
+        }
+    )
+    
+    workflow.add_conditional_edges(
+        "execute_tools", 
+        should_continue,
+        {
+            "parse_request": "parse_request",
+            END: END
+        }
+    )
+    
+    return workflow.compile()
+
+# Main execution function
+async def run_playwright_automation(test_prompt: str, max_iterations: int = 10, browser_config: Dict[str, Any] = None) -> Dict[str, Any]:
+    """
+    Run Playwright automation test with visible browser.
+    
+    Args:
+        test_prompt: Natural language test description
+        max_iterations: Max plan-execute cycles
+        browser_config: Browser configuration (headless, browser_type, etc.)
+        
+    Returns:
+        Test results dictionary
+    """
+    
+    # Default browser config
+    if browser_config is None:
+        browser_config = {
+            "headless": False,  # Visible browser by default
+            "browser_type": "chromium"
+        }
+    
+    # Initialize state
+    initial_state = AgentState(
+        messages=[HumanMessage(content=test_prompt)],
+        test_plan="",
+        current_step=0,
+        total_steps=0,
+        results=[],
+        errors=[],
+        is_complete=False,
+        max_iterations=max_iterations,
+        browser_config=browser_config
+    )
+    
+    print(f"\n[🎭 PLAYWRIGHT] Starting automation test: '{test_prompt}'")
+    print(f"[🎭 PLAYWRIGHT] Browser config: {browser_config}")
+    print(f"[🎭 PLAYWRIGHT] Max iterations: {max_iterations}")
+    
+    # Create and run agent
+    agent = create_playwright_agent()
+    
+    try:
+        final_state = await agent.ainvoke(initial_state)
+        
+        print(f"\n[🎭 PLAYWRIGHT] Test completed:")
+        print(f"  - Steps executed: {final_state['current_step']}")
+        print(f"  - Is complete: {final_state.get('is_complete', False)}")
+        print(f"  - Total messages: {len(final_state['messages'])}")
+        print(f"  - Errors: {final_state.get('errors', [])}")
+        
+        # Ensure browser cleanup
+        try:
+            await pw_state.cleanup()
+        except:
+            pass
+        
+        return {
+            "status": "success",
+            "test_prompt": test_prompt,
+            "steps_executed": final_state["current_step"],
+            "results": final_state["results"],
+            "errors": final_state["errors"],
+            "browser_config": browser_config,
+            "messages": [
+                {"role": getattr(m, 'type', 'unknown'), "content": str(getattr(m, 'content', m))}
+                for m in final_state["messages"]
+            ]
+        }
+        
+    except Exception as e:
+        print(f"[❌ PLAYWRIGHT] Agent error: {e}")
+        
+        # Cleanup on error
+        try:
+            await pw_state.cleanup()
+        except:
+            pass
+            
+        return {
+            "status": "error", 
+            "test_prompt": test_prompt,
+            "error": str(e),
+            "steps_executed": initial_state["current_step"],
+            "results": initial_state["results"]
+        }
+
+# Synchronous wrapper
+def run_test_with_visible_browser(prompt: str, max_iterations: int = 10, headless: bool = False) -> Dict[str, Any]:
+    """Synchronous wrapper for Playwright automation with visible browser
+    
+    Args:
+        prompt: Test description in natural language
+        max_iterations: Maximum plan-execute cycles
+        headless: Whether to run browser in headless mode (default: False for visible)
+    """
+    browser_config = {
+        "headless": headless,
+        "browser_type": "chromium"
+    }
+    
+    return asyncio.run(run_playwright_automation(prompt, max_iterations, browser_config))
+
+if __name__ == "__main__":
+    # Example usage with visible browser
+    test_prompts = [
+        "Open https://example.com, take a screenshot, and get page content",
+        "Navigate to Google, search for 'Playwright automation', and take a screenshot of results",
+        "Go to GitHub.com, get the page content, and take a screenshot"
+    ]
+    
+    print("🎭 PLAYWRIGHT DIRECT AUTOMATION AGENT")
+    print("=====================================")
+    print("This agent uses Playwright directly with VISIBLE browser windows")
+    print()
+    
+    for i, prompt in enumerate(test_prompts, 1):
+        print(f"\n{'='*60}")
+        print(f"Test {i}: {prompt}")
+        print('='*60)
+        
+        result = run_test_with_visible_browser(prompt)
+        
+        print(f"\n📊 Results:")
+        print(f"  Status: {result['status']}")
+        print(f"  Steps executed: {result.get('steps_executed', 0)}")
+        if result.get('errors'):
+            print(f"  Errors: {result['errors']}")
+        
+        print(f"\n⏸️  Pausing for 3 seconds before next test...")
+        import time
+        time.sleep(3)
+        
+    print(f"\n✅ All tests completed!")

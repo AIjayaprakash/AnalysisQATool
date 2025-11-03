@@ -4,8 +4,14 @@
       "command": "npx",
       "args": [
         "-y",
-        "@playwright/mcp"
-      ]
+        "@playwright/mcp",
+        "--headed"
+      ],
+      "env": {
+        "PLAYWRIGHT_HEADED": "true",
+        "PLAYWRIGHT_BROWSER": "chromium",
+        "HEADLESS": "false"
+      }
     }
   }
 }  
