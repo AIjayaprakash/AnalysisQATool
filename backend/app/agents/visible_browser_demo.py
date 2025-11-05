@@ -24,15 +24,14 @@ async def visible_browser_demo():
     # Simple test that shows clear visible actions
     test_prompt = """
     Please do the following automation steps with a visible browser:
-    1. Navigate to https://example.com
-    2. Take a screenshot of the page
-    3. Get the page content to analyze what's on the page
-    4. Wait 3 seconds so we can see the browser
-    5. Navigate to https://httpbin.org/html (a different page)
-    6. Take another screenshot
-    7. Close the browser when done
-    
-    Make sure each step is clearly visible and take your time between actions.
+    1. Navigate to https://acme-test.uipath.com/
+    2. Enter the email "jaya.prakash4@cognizant.com"
+    3. Enter the password has "Novjp@2025"
+    4. Click Login
+    5. Wait for an text "#dashmenu > div:nth-child(2) > a > button" to laod
+    5. Click "#dashmenu > div:nth-child(2) > a > button"
+    6. Get all the "body > div > div.main-container > div > table" values
+    Make sure each step is clearly visible and take your time between actions. Don't take screenshot for all navigation steps
     """
     
     print("🎯 Test: Multi-step visible browser automation")
@@ -50,7 +49,7 @@ async def visible_browser_demo():
     try:
         result = await run_playwright_automation(
             test_prompt=test_prompt,
-            max_iterations=15,
+            max_iterations=2,
             browser_config=browser_config
         )
         

@@ -48,6 +48,12 @@ class PlaywrightState:
             self.browser = await self.playwright.firefox.launch(headless=headless)
         elif browser_type == "webkit":
             self.browser = await self.playwright.webkit.launch(headless=headless)
+        elif browser_type == "edge":
+            # Microsoft Edge support
+            self.browser = await self.playwright.chromium.launch(
+                headless=headless,
+                channel="msedge"  # Use Microsoft Edge channel
+            )
         else:  # chromium (default)
             self.browser = await self.playwright.chromium.launch(headless=headless)
         
@@ -286,64 +292,30 @@ playwright_tools = [
 
 print(f"[OK] Created {len(playwright_tools)} Playwright automation tools")
 
-# LLM Setup - Try OpenAI first, fallback to Groq
-try:
-    from langchain_openai import ChatOpenAI
-    if os.getenv("OPENAI_API_KEY"):
-        print("[INFO] Using OpenAI GPT-4 (best tool calling support)")
-        llm = ChatOpenAI(model="gpt-4", temperature=0)
-        llm_with_tools = llm.bind_tools(playwright_tools)
-    else:
-        raise ImportError("No OpenAI API key")
-except (ImportError, Exception):
-    print("[INFO] Using Groq with custom function calling")
-    from langchain_groq import ChatGroq
-    if not os.getenv("GROQ_API_KEY"):
-        print("Warning: GROQ_API_KEY not set. The agent will not work without a valid API key.")
-    os.environ["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY", "dummy-key")
-    
-    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
-    llm_with_tools = llm
+# LLM Setup - Using Groq exclusively
+print("[INFO] Using Groq AI with llama-3.3-70b-versatile model")
+from langchain_groq import ChatGroq
+
+if not os.getenv("GROQ_API_KEY"):
+    print("ERROR: GROQ_API_KEY not set. Please set your Groq API key in environment variables.")
+    print("You can get a free API key from: https://console.groq.com/keys")
+    raise ValueError("GROQ_API_KEY is required")
+
+llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+llm_with_tools = llm  # No tool binding for Groq - we use manual parsing
 
 # Agent Nodes
 def parse_test_request(state: AgentState) -> AgentState:
     """Parse user's test request and create execution plan"""
     messages = state["messages"]
     
-    # Check if using OpenAI or Groq
-    using_openai = hasattr(llm_with_tools, 'bound_tools') and llm_with_tools.bound_tools
-    
-    if using_openai:
-        system_prompt = """You are an expert QA automation engineer using Playwright for web automation.
-
-CRITICAL: You MUST use the available Playwright tools to execute tests. The browser will be VISIBLE during automation.
-
-Available Playwright tools (use function calls):
-- playwright_navigate(url) - Navigate to a website (opens visible browser)
-- playwright_click(selector, element_description) - Click elements
-- playwright_type(selector, text, element_description) - Type into input fields
-- playwright_screenshot(filename) - Take screenshots
-- playwright_wait_for_selector(selector, timeout) - Wait for elements
-- playwright_wait_for_text(text, timeout) - Wait for text to appear
-- playwright_get_page_content() - Get page structure and content
-- playwright_execute_javascript(script) - Run JavaScript
-- playwright_close_browser() - Close browser when done
-
-EXECUTION RULES:
-1. ALWAYS start by calling playwright_navigate to open the target website
-2. Use function calls to execute tools - the browser will be visible
-3. Take screenshots to document the automation steps
-4. Use playwright_get_page_content() to understand page structure
-5. Always close the browser when the test is complete
-
-REMEMBER: Use function calls to perform actual automation with visible browser!"""
-    else:
-        system_prompt = """You are an expert QA automation engineer using Playwright for web automation.
+    # Using Groq with manual TOOL_CALL format
+    system_prompt = """You are an expert QA automation engineer using Playwright for web automation.
 
 CRITICAL: You MUST specify Playwright actions using the TOOL_CALL format below. The browser will be VISIBLE.
 
 Available Playwright tools:
-- playwright_navigate(url) - Navigate to a website (opens visible browser)
+- playwright_navigate(url) - Navigate to a website (opens visible browser - supports Chromium, Firefox, WebKit, Edge)
 - playwright_click(selector, element_description) - Click elements  
 - playwright_type(selector, text, element_description) - Type into input fields
 - playwright_screenshot(filename) - Take screenshots
@@ -352,6 +324,8 @@ Available Playwright tools:
 - playwright_get_page_content() - Get page structure and content
 - playwright_execute_javascript(script) - Run JavaScript
 - playwright_close_browser() - Close browser when done
+
+Supported browser types: chromium (default), firefox, webkit, edge
 
 EXECUTION FORMAT:
 Use this exact format to call tools:
@@ -398,88 +372,69 @@ Execute the test now using tool calls.""")
     return state
 
 async def execute_tools(state: AgentState) -> AgentState:
-    """Execute tool calls from the LLM response"""
+    """Execute tool calls from the LLM response using Groq manual format parsing"""
     last_message = state["messages"][-1]
     
-    # Handle OpenAI function calls
-    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        tool_call_names = [tc.get("name", "unknown") for tc in last_message.tool_calls]
-        print(f"  -> Step {state['current_step']}: Executing {len(last_message.tool_calls)} Playwright tool(s): {', '.join(tool_call_names)}")
+    # Parse Groq manual format
+    content = str(last_message.content) if hasattr(last_message, 'content') else ""
+    
+    import re
+    import json
+    
+    tool_calls = []
+    pattern = r'TOOL_CALL:\s*([^\n]+)\s*\nARGS:\s*(\{[^}]*\})'
+    matches = re.findall(pattern, content, re.MULTILINE | re.DOTALL)
+    
+    for tool_name, args_str in matches:
+        tool_name = tool_name.strip()
+        try:
+            args = json.loads(args_str) if args_str.strip() else {}
+            tool_calls.append({"name": tool_name, "args": args})
+        except json.JSONDecodeError:
+            print(f"[ERROR] Failed to parse args for {tool_name}: {args_str}")
+            continue
+    
+    if tool_calls:
+        tool_call_names = [tc["name"] for tc in tool_calls]
+        print(f"  -> Step {state['current_step']}: Executing {len(tool_calls)} Playwright tool(s): {', '.join(tool_call_names)}")
         
-        # Execute tools using ToolNode
-        tool_node = ToolNode(playwright_tools)
-        result = await tool_node.ainvoke({"messages": [last_message]})
+        tool_results = []
         
-        state["messages"].extend(result["messages"])
+        for tool_call in tool_calls:
+            tool_name = tool_call["name"]
+            args = tool_call["args"]
+            
+            # Find and execute the actual tool
+            tool_func = None
+            for tool in playwright_tools:
+                if tool.name == tool_name:
+                    tool_func = tool
+                    break
+            
+            if tool_func:
+                try:
+                    # Execute the async tool function
+                    result = await tool_func.ainvoke(args)
+                    tool_results.append(f"✅ {tool_name}: {result}")
+                except Exception as e:
+                    tool_results.append(f"❌ {tool_name}: Error - {str(e)}")
+            else:
+                tool_results.append(f"❌ {tool_name}: Tool not found")
+        
+        # Create result message
+        combined_result = "Tool execution results:\n" + "\n".join(tool_results)
+        result_message = AIMessage(content=combined_result)
+        
+        state["messages"].append(result_message)
         state["results"].append({
             "step": state["current_step"],
-            "tool_calls": len(last_message.tool_calls),
+            "tool_calls": len(tool_calls),
             "tool_names": tool_call_names,
             "timestamp": datetime.now().isoformat()
         })
         state["current_step"] += 1
-        
     else:
-        # Parse Groq manual format
-        content = str(last_message.content) if hasattr(last_message, 'content') else ""
-        
-        import re
-        import json
-        
-        tool_calls = []
-        pattern = r'TOOL_CALL:\s*([^\n]+)\s*\nARGS:\s*(\{[^}]*\})'
-        matches = re.findall(pattern, content, re.MULTILINE | re.DOTALL)
-        
-        for tool_name, args_str in matches:
-            tool_name = tool_name.strip()
-            try:
-                args = json.loads(args_str) if args_str.strip() else {}
-                tool_calls.append({"name": tool_name, "args": args})
-            except json.JSONDecodeError:
-                print(f"[ERROR] Failed to parse args for {tool_name}: {args_str}")
-                continue
-        
-        if tool_calls:
-            tool_call_names = [tc["name"] for tc in tool_calls]
-            print(f"  -> Step {state['current_step']}: Executing {len(tool_calls)} Playwright tool(s): {', '.join(tool_call_names)}")
-            
-            tool_results = []
-            
-            for tool_call in tool_calls:
-                tool_name = tool_call["name"]
-                args = tool_call["args"]
-                
-                # Find and execute the actual tool
-                tool_func = None
-                for tool in playwright_tools:
-                    if tool.name == tool_name:
-                        tool_func = tool
-                        break
-                
-                if tool_func:
-                    try:
-                        # Execute the async tool function
-                        result = await tool_func.ainvoke(args)
-                        tool_results.append(f"✅ {tool_name}: {result}")
-                    except Exception as e:
-                        tool_results.append(f"❌ {tool_name}: Error - {str(e)}")
-                else:
-                    tool_results.append(f"❌ {tool_name}: Tool not found")
-            
-            # Create result message
-            combined_result = "Tool execution results:\n" + "\n".join(tool_results)
-            result_message = AIMessage(content=combined_result)
-            
-            state["messages"].append(result_message)
-            state["results"].append({
-                "step": state["current_step"],
-                "tool_calls": len(tool_calls),
-                "tool_names": tool_call_names,
-                "timestamp": datetime.now().isoformat()
-            })
-            state["current_step"] += 1
-        else:
-            state["is_complete"] = True
+        state["is_complete"] = True
     
     # Check iteration limit
     if state["current_step"] >= state["max_iterations"]:
@@ -504,23 +459,14 @@ def should_continue(state: AgentState) -> str:
     last_message = state["messages"][-1]
     print(f"[DEBUG] Last message type: {type(last_message).__name__}")
     
-    # Check for tool calls
-    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        print(f"[DEBUG] -> execute_tools ({len(last_message.tool_calls)} tool calls)")
-        return "execute_tools"
-    
-    # Check for Groq format
+    # Check for Groq TOOL_CALL format
     if hasattr(last_message, 'content'):
         content = str(last_message.content)
         if "TOOL_CALL:" in content:
-            print("[DEBUG] -> execute_tools (manual format)")
+            print("[DEBUG] -> execute_tools (Groq TOOL_CALL format)")
             return "execute_tools"
     
     # Continue after tool results
-    if isinstance(last_message, ToolMessage):
-        print("[DEBUG] -> parse_request (after tool response)")
-        return "parse_request"
-    
     if isinstance(last_message, AIMessage) and "Tool execution results:" in str(last_message.content):
         print("[DEBUG] -> parse_request (after tool results)")
         return "parse_request"
@@ -562,7 +508,7 @@ def create_playwright_agent():
     return workflow.compile()
 
 # Main execution function
-async def run_playwright_automation(test_prompt: str, max_iterations: int = 10, browser_config: Dict[str, Any] = None) -> Dict[str, Any]:
+async def run_playwright_automation(test_prompt: str, max_iterations: int = 1, browser_config: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     Run Playwright automation test with visible browser.
     
@@ -648,43 +594,70 @@ async def run_playwright_automation(test_prompt: str, max_iterations: int = 10, 
         }
 
 # Synchronous wrapper
-def run_test_with_visible_browser(prompt: str, max_iterations: int = 10, headless: bool = False) -> Dict[str, Any]:
+def run_test_with_visible_browser(prompt: str, max_iterations: int = 10, headless: bool = False, browser_type: str = "chromium") -> Dict[str, Any]:
     """Synchronous wrapper for Playwright automation with visible browser
     
     Args:
         prompt: Test description in natural language
         max_iterations: Maximum plan-execute cycles
         headless: Whether to run browser in headless mode (default: False for visible)
+        browser_type: Browser type to use (chromium, firefox, webkit, edge)
     """
     browser_config = {
         "headless": headless,
-        "browser_type": "chromium"
+        "browser_type": browser_type
     }
     
     return asyncio.run(run_playwright_automation(prompt, max_iterations, browser_config))
 
 if __name__ == "__main__":
-    # Example usage with visible browser
-    test_prompts = [
-        "Open https://example.com, take a screenshot, and get page content",
-        "Navigate to Google, search for 'Playwright automation', and take a screenshot of results",
-        "Go to GitHub.com, get the page content, and take a screenshot"
+    # Example usage with different browsers
+    test_configs = [
+        {
+            "prompt": "Open https://example.com, take a screenshot, and get page content",
+            "browser": "chromium",
+            "description": "Test with Chromium browser"
+        },
+        {
+            "prompt": "Navigate to Google, search for 'Playwright automation', and take a screenshot of results",
+            "browser": "edge",
+            "description": "Test with Microsoft Edge browser"
+        },
+        {
+            "prompt": "Go to GitHub.com, get the page content, and take a screenshot",
+            "browser": "firefox",
+            "description": "Test with Firefox browser"
+        }
     ]
     
     print("🎭 PLAYWRIGHT DIRECT AUTOMATION AGENT")
     print("=====================================")
-    print("This agent uses Playwright directly with VISIBLE browser windows")
+    print("This agent supports multiple browsers: Chromium, Edge, Firefox, WebKit")
+    print("All browsers will be VISIBLE during automation")
     print()
     
-    for i, prompt in enumerate(test_prompts, 1):
+    for i, config in enumerate(test_configs, 1):
         print(f"\n{'='*60}")
-        print(f"Test {i}: {prompt}")
+        print(f"Test {i}: {config['description']}")
+        print(f"Browser: {config['browser'].upper()}")
+        print(f"Prompt: {config['prompt']}")
         print('='*60)
         
-        result = run_test_with_visible_browser(prompt)
+        # Create browser config for this test
+        browser_config = {
+            "headless": False,
+            "browser_type": config['browser']
+        }
+        
+        result = asyncio.run(run_playwright_automation(
+            config['prompt'], 
+            max_iterations=10, 
+            browser_config=browser_config
+        ))
         
         print(f"\n📊 Results:")
         print(f"  Status: {result['status']}")
+        print(f"  Browser: {config['browser']}")
         print(f"  Steps executed: {result.get('steps_executed', 0)}")
         if result.get('errors'):
             print(f"  Errors: {result['errors']}")
@@ -693,4 +666,4 @@ if __name__ == "__main__":
         import time
         time.sleep(3)
         
-    print(f"\n✅ All tests completed!")
+    print(f"\n✅ All tests completed with multiple browsers!")
