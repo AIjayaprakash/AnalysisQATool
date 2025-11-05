@@ -27,6 +27,18 @@ from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 print("[OK] Direct Playwright LangGraph Agent - Standalone Playwright Integration")
 print("  This agent uses Playwright framework directly for visible browser automation")
 
+# Check Pydantic version for compatibility
+try:
+    import pydantic
+    pydantic_version = pydantic.VERSION
+    print(f"[INFO] Pydantic version: {pydantic_version}")
+    if pydantic_version.startswith('1.'):
+        print("[INFO] Using Pydantic v1 compatibility mode")
+    else:
+        print("[INFO] Using Pydantic v2+ compatibility mode")
+except:
+    print("[WARNING] Could not detect Pydantic version")
+
 # Global browser state management
 class PlaywrightState:
     def __init__(self):
@@ -91,6 +103,21 @@ class AgentState(TypedDict):
     is_complete: bool
     max_iterations: int
     browser_config: Dict[str, Any]
+
+# Pydantic compatibility helper
+def safe_model_dump(obj):
+    """Safely extract data from Pydantic models across v1/v2 versions"""
+    if hasattr(obj, 'model_dump'):
+        try:
+            return obj.model_dump()
+        except AttributeError:
+            pass
+    if hasattr(obj, 'dict'):
+        try:
+            return obj.dict()
+        except AttributeError:
+            pass
+    return obj
 
 # Custom Playwright Tools using @tool decorator
 @tool
@@ -413,11 +440,32 @@ async def execute_tools(state: AgentState) -> AgentState:
             
             if tool_func:
                 try:
-                    # Execute the async tool function
-                    result = await tool_func.ainvoke(args)
+                    # Execute the async tool function with compatibility handling
+                    try:
+                        # Try standard tool invocation first
+                        result = await tool_func.ainvoke(args)
+                    except AttributeError as ae:
+                        if "model_dump" in str(ae):
+                            # Handle Pydantic v1/v2 compatibility issue
+                            # Call the tool function directly
+                            result = await tool_func.func(**args)
+                        else:
+                            raise ae
+                    except Exception as tool_error:
+                        # Try alternative invocation methods
+                        try:
+                            result = await tool_func.func(**args) 
+                        except:
+                            # Final fallback - direct function call
+                            result = await tool_func(**args)
+                    
                     tool_results.append(f"✅ {tool_name}: {result}")
                 except Exception as e:
-                    tool_results.append(f"❌ {tool_name}: Error - {str(e)}")
+                    error_msg = str(e)
+                    if "model_dump" in error_msg:
+                        tool_results.append(f"❌ {tool_name}: Pydantic compatibility error - {error_msg}")
+                    else:
+                        tool_results.append(f"❌ {tool_name}: Error - {error_msg}")
             else:
                 tool_results.append(f"❌ {tool_name}: Tool not found")
         
