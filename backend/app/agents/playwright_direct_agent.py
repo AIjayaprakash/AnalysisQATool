@@ -22,20 +22,15 @@ from langchain_core.tools import tool
 # Playwright imports
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 
-print("[OK] Direct Playwright LangGraph Agent - WITH model_dump compatibility fixes")
-print("  This agent uses LangGraph for tool management with fixed state serialization")
+print("[OK] Playwright Agent with OUTPUT PARSER - No model_dump issues")
+print("  This version uses output parsing instead of tool serialization")
 
-# Check versions and apply compatibility fixes
+# Version info
 try:
     import pydantic
     pydantic_version = pydantic.__version__ if hasattr(pydantic, '__version__') else pydantic.VERSION
     print(f"[INFO] Pydantic version: {pydantic_version}")
-    
-    import langgraph
-    langgraph_version = getattr(langgraph, '__version__', 'unknown')
-    print(f"[INFO] LangGraph version: {langgraph_version}")
-    
-    print("[INFO] Applying model_dump compatibility fixes for your environment")
+    print("[INFO] Using OUTPUT PARSER approach to eliminate model_dump errors")
 except Exception as e:
     print(f"[WARNING] Could not detect versions: {e}")
 
@@ -104,48 +99,27 @@ class AgentState(TypedDict):
     max_iterations: int
     browser_config: Dict[str, Any]
 
-# Compatibility helper to prevent model_dump errors
-def safe_serialize_message(msg):
-    """Safely serialize messages to prevent model_dump errors"""
-    if isinstance(msg, str):
-        return msg
-    if hasattr(msg, 'content'):
-        return str(msg.content)
-    return str(msg)
+# OUTPUT PARSER APPROACH - Direct Functions (NO @tool decorators)
+# This completely eliminates model_dump serialization issues
 
-# Custom Playwright Tools with model_dump compatibility
-@tool
-async def playwright_navigate(url: str) -> str:
-    """Navigate browser to a URL. This will open a visible browser window.
-    
-    Args:
-        url: The full URL to navigate to (e.g., https://example.com)
-    """
+async def pw_navigate(url: str) -> str:
+    """Navigate browser to a URL"""
     try:
-        # Initialize browser if not already done
         if not pw_state.is_initialized:
-            await pw_state.initialize(headless=False)  # Visible browser
+            await pw_state.initialize(headless=False)
         
         await pw_state.page.goto(url)
         title = await pw_state.page.title()
-        
         return f"✅ Successfully navigated to {url} - Page title: '{title}'"
     except Exception as e:
         return f"❌ Failed to navigate to {url}: {str(e)}"
 
-@tool
-async def playwright_click(selector: str, element_description: str = "") -> str:
-    """Click an element on the page.
-    
-    Args:
-        selector: CSS selector, text selector, or xpath for the element
-        element_description: Human readable description of the element (optional)
-    """
+async def pw_click(selector: str, element_description: str = "") -> str:
+    """Click an element on the page"""
     try:
         if not pw_state.is_initialized:
             return "❌ Browser not initialized. Please navigate to a page first."
         
-        # Handle different selector types
         if selector.startswith("text="):
             await pw_state.page.click(selector)
         elif selector.startswith("//"):
@@ -158,52 +132,32 @@ async def playwright_click(selector: str, element_description: str = "") -> str:
     except Exception as e:
         return f"❌ Failed to click element {selector}: {str(e)}"
 
-@tool
-async def playwright_type(selector: str, text: str, element_description: str = "") -> str:
-    """Type text into an input field.
-    
-    Args:
-        selector: CSS selector for the input element
-        text: Text to type into the field
-        element_description: Human readable description of the field (optional)
-    """
+async def pw_type(selector: str, text: str, element_description: str = "") -> str:
+    """Type text into an input field"""
     try:
         if not pw_state.is_initialized:
             return "❌ Browser not initialized. Please navigate to a page first."
         
         await pw_state.page.fill(selector, text)
-        
         desc = f" ({element_description})" if element_description else ""
         return f"✅ Successfully typed '{text}' into {selector}{desc}"
     except Exception as e:
         return f"❌ Failed to type into {selector}: {str(e)}"
 
-@tool
-async def playwright_screenshot(filename: str = "screenshot.png") -> str:
-    """Take a screenshot of the current page.
-    
-    Args:
-        filename: Filename to save screenshot (defaults to screenshot.png)
-    """
+async def pw_screenshot(filename: str = "screenshot.png") -> str:
+    """Take a screenshot of the current page"""
     try:
         if not pw_state.is_initialized:
             return "❌ Browser not initialized. Please navigate to a page first."
         
         screenshot_path = os.path.join(os.getcwd(), filename)
         await pw_state.page.screenshot(path=screenshot_path)
-        
         return f"✅ Screenshot saved to: {screenshot_path}"
     except Exception as e:
         return f"❌ Failed to take screenshot: {str(e)}"
 
-@tool
-async def playwright_wait_for_selector(selector: str, timeout: int = 5000) -> str:
-    """Wait for an element to appear on the page.
-    
-    Args:
-        selector: CSS selector to wait for
-        timeout: Timeout in milliseconds (default: 5000)
-    """
+async def pw_wait_for_selector(selector: str, timeout: int = 5000) -> str:
+    """Wait for an element to appear on the page"""
     try:
         if not pw_state.is_initialized:
             return "❌ Browser not initialized. Please navigate to a page first."
@@ -213,14 +167,8 @@ async def playwright_wait_for_selector(selector: str, timeout: int = 5000) -> st
     except Exception as e:
         return f"❌ Element {selector} did not appear within {timeout}ms: {str(e)}"
 
-@tool
-async def playwright_wait_for_text(text: str, timeout: int = 5000) -> str:
-    """Wait for specific text to appear on the page.
-    
-    Args:
-        text: Text to wait for
-        timeout: Timeout in milliseconds (default: 5000)
-    """
+async def pw_wait_for_text(text: str, timeout: int = 5000) -> str:
+    """Wait for specific text to appear on the page"""
     try:
         if not pw_state.is_initialized:
             return "❌ Browser not initialized. Please navigate to a page first."
@@ -230,10 +178,8 @@ async def playwright_wait_for_text(text: str, timeout: int = 5000) -> str:
     except Exception as e:
         return f"❌ Text '{text}' did not appear within {timeout}ms: {str(e)}"
 
-@tool
-async def playwright_get_page_content() -> str:
-    """Get the current page content and structure.
-    """
+async def pw_get_page_content() -> str:
+    """Get the current page content and structure"""
     try:
         if not pw_state.is_initialized:
             return "❌ Browser not initialized. Please navigate to a page first."
@@ -241,7 +187,6 @@ async def playwright_get_page_content() -> str:
         title = await pw_state.page.title()
         url = pw_state.page.url
         
-        # Get some basic page info
         content = await pw_state.page.evaluate("""
             () => {
                 const headings = Array.from(document.querySelectorAll('h1, h2, h3')).slice(0, 5).map(h => h.textContent.trim());
@@ -256,16 +201,11 @@ async def playwright_get_page_content() -> str:
             }
         """)
         
-        result = f"📄 Page Info:\n"
-        result += f"  Title: {title}\n"
-        result += f"  URL: {url}\n"
-        
+        result = f"📄 Page Info:\n  Title: {title}\n  URL: {url}\n"
         if content['headings']:
             result += f"  Headings: {', '.join(content['headings'][:3])}\n"
-        
         if content['links']:
             result += f"  Links found: {len(content['links'])}\n"
-        
         if content['inputs']:
             result += f"  Input fields: {len(content['inputs'])}\n"
         
@@ -273,13 +213,8 @@ async def playwright_get_page_content() -> str:
     except Exception as e:
         return f"❌ Failed to get page content: {str(e)}"
 
-@tool
-async def playwright_execute_javascript(script: str) -> str:
-    """Execute JavaScript code in the browser context.
-    
-    Args:
-        script: JavaScript code to execute
-    """
+async def pw_execute_javascript(script: str) -> str:
+    """Execute JavaScript code in the browser context"""
     try:
         if not pw_state.is_initialized:
             return "❌ Browser not initialized. Please navigate to a page first."
@@ -289,29 +224,38 @@ async def playwright_execute_javascript(script: str) -> str:
     except Exception as e:
         return f"❌ Failed to execute JavaScript: {str(e)}"
 
-@tool 
-async def playwright_close_browser() -> str:
-    """Close the browser and clean up resources."""
+async def pw_close_browser() -> str:
+    """Close the browser and clean up resources"""
     try:
         await pw_state.cleanup()
         return "✅ Browser closed successfully"
     except Exception as e:
         return f"❌ Failed to close browser: {str(e)}"
 
-# Collect all tools
-playwright_tools = [
-    playwright_navigate,
-    playwright_click,
-    playwright_type,
-    playwright_screenshot,
-    playwright_wait_for_selector,
-    playwright_wait_for_text,
-    playwright_get_page_content,
-    playwright_execute_javascript,
-    playwright_close_browser,
-]
+# Function mapping for output parser
+PLAYWRIGHT_FUNCTIONS = {
+    "pw_navigate": pw_navigate,
+    "pw_click": pw_click,
+    "pw_type": pw_type,
+    "pw_screenshot": pw_screenshot,
+    "pw_wait_for_selector": pw_wait_for_selector,
+    "pw_wait_for_text": pw_wait_for_text,
+    "pw_get_page_content": pw_get_page_content,
+    "pw_execute_javascript": pw_execute_javascript,
+    "pw_close_browser": pw_close_browser,
+}
 
-print(f"[OK] Created {len(playwright_tools)} Playwright automation tools")
+# Add missing navigate function alias for compatibility
+async def playwright_navigate(url: str) -> str:
+    """Navigate to a URL - compatibility wrapper for pw_navigate"""
+    return await pw_navigate(url)
+
+# Add to function mapping with both names
+PLAYWRIGHT_FUNCTIONS["playwright_navigate"] = playwright_navigate
+
+# All tools now use direct functions without @tool decorators - accessed via PLAYWRIGHT_FUNCTIONS dict
+
+print(f"[OK] Created {len(PLAYWRIGHT_FUNCTIONS)} Playwright automation tools")
 
 # LLM Setup - Using Groq exclusively
 print("[INFO] Using Groq AI with llama-3.3-70b-versatile model")
@@ -335,7 +279,7 @@ def parse_test_request(state: AgentState) -> AgentState:
 
 CRITICAL: You MUST specify Playwright actions using the TOOL_CALL format below. The browser will be VISIBLE.
 
-Available Playwright tools:
+Available Playwright tools (using OUTPUT PARSER approach):
 - playwright_navigate(url) - Navigate to a website (opens visible browser - supports Chromium, Firefox, WebKit, Edge)
 - playwright_click(selector, element_description) - Click elements  
 - playwright_type(selector, text, element_description) - Type into input fields
@@ -393,7 +337,8 @@ Execute the test now using tool calls.""")
     return state
 
 async def execute_tools(state: AgentState) -> AgentState:
-    """Execute tool calls from the LLM response using Groq manual format parsing"""
+    """OUTPUT PARSER APPROACH: Execute tool calls using direct function calls (no @tool decorators)
+    This completely eliminates model_dump serialization issues by bypassing Pydantic altogether"""
     last_message = state["messages"][-1]
     
     # Parse Groq manual format
@@ -425,72 +370,39 @@ async def execute_tools(state: AgentState) -> AgentState:
             tool_name = tool_call["name"]
             args = tool_call["args"]
             
-            # Find and execute the actual tool
-            tool_func = None
-            for tool in playwright_tools:
-                if tool.name == tool_name:
-                    tool_func = tool
-                    break
+            # OUTPUT PARSER: Map tool names to direct functions  
+            tool_name_mapping = {
+                "playwright_navigate": "pw_navigate",
+                "playwright_click": "pw_click", 
+                "playwright_type": "pw_type",
+                "playwright_screenshot": "pw_screenshot",
+                "playwright_wait_for_selector": "pw_wait_for_selector",
+                "playwright_wait_for_text": "pw_wait_for_text",
+                "playwright_get_page_content": "pw_get_page_content",
+                "playwright_execute_javascript": "pw_execute_javascript",
+                "playwright_close_browser": "pw_close_browser",
+            }
+            
+            # Get the actual function name
+            actual_func_name = tool_name_mapping.get(tool_name, tool_name)
+            tool_func = PLAYWRIGHT_FUNCTIONS.get(actual_func_name)
             
             if tool_func:
                 try:
-                    # FIXED: Direct tool execution to avoid model_dump serialization issues
-                    result = None
+                    # DIRECT FUNCTION CALL - No Pydantic, no model_dump, no serialization issues
+                    result = await tool_func(**args)
+                    tool_results.append(f"✅ {tool_name}: {result}")
                     
-                    # Method 1: Direct function call (bypasses model_dump completely)
-                    try:
-                        if hasattr(tool_func, 'func'):
-                            # Call the underlying function directly
-                            result = await tool_func.func(**args)
-                        else:
-                            # Fallback direct call
-                            result = await tool_func(**args)
-                    except Exception as direct_error:
-                        print(f"[DEBUG] Direct call failed: {direct_error}")
-                        # Method 2: Try ainvoke with safe input handling
-                        try:
-                            # Create a safe input object that works with any Pydantic version
-                            class SafeToolInput:
-                                def __init__(self, **kwargs):
-                                    self.__dict__.update(kwargs)
-                                
-                                def dict(self):
-                                    return self.__dict__
-                                
-                                def model_dump(self):
-                                    return self.__dict__
-                                
-                                def __str__(self):
-                                    return str(self.__dict__)
-                            
-                            # Try with safe input object
-                            safe_input = SafeToolInput(**args)
-                            result = await tool_func.ainvoke(safe_input)
-                        except Exception as ainvoke_error:
-                            print(f"[DEBUG] ainvoke failed: {ainvoke_error}")
-                            # Final fallback: try with plain dictionary
-                            try:
-                                result = await tool_func.ainvoke(args)
-                            except Exception as dict_error:
-                                print(f"[DEBUG] Dictionary input failed: {dict_error}")
-                                result = f"❌ Tool execution failed: {dict_error}"
-                    
-                    if result is not None:
-                        tool_results.append(f"✅ {tool_name}: {result}")
-                    else:
-                        tool_results.append(f"❌ {tool_name}: No result returned")
-                        
                 except Exception as e:
-                    error_msg = str(e)
-                    if "model_dump" in error_msg:
-                        tool_results.append(f"❌ {tool_name}: LangGraph 1.0.2 + Pydantic 2.12.4 compatibility issue - {error_msg}")
-                        print(f"[ERROR] Full error details for debugging: {e}")
-                    else:
-                        tool_results.append(f"❌ {tool_name}: Error - {error_msg}")
+                    error_msg = f"❌ Error executing {tool_name}: {str(e)}"
+                    tool_results.append(f"Tool: {tool_name}\nResult: {error_msg}")
+                    print(f"[ERROR] {error_msg}")
             else:
-                tool_results.append(f"❌ {tool_name}: Tool not found")
+                error_msg = f"❌ Tool '{tool_name}' not found"
+                tool_results.append(f"Tool: {tool_name}\nResult: {error_msg}")
+                print(f"[ERROR] {error_msg}")
         
-        # Create result message
+        # Create result message  
         combined_result = "Tool execution results:\n" + "\n".join(tool_results)
         result_message = AIMessage(content=combined_result)
         
