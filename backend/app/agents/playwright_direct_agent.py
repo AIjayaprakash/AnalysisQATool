@@ -27,17 +27,32 @@ from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 print("[OK] Direct Playwright LangGraph Agent - Standalone Playwright Integration")
 print("  This agent uses Playwright framework directly for visible browser automation")
 
-# Check Pydantic version for compatibility
+# Check Pydantic and LangGraph versions for compatibility
 try:
     import pydantic
-    pydantic_version = pydantic.VERSION
+    pydantic_version = pydantic.__version__ if hasattr(pydantic, '__version__') else pydantic.VERSION
     print(f"[INFO] Pydantic version: {pydantic_version}")
+    
+    import langgraph
+    langgraph_version = langgraph.__version__ if hasattr(langgraph, '__version__') else "unknown"
+    print(f"[INFO] LangGraph version: {langgraph_version}")
+    
+    import langchain
+    langchain_version = langchain.__version__ if hasattr(langchain, '__version__') else "unknown"
+    print(f"[INFO] LangChain version: {langchain_version}")
+    
     if pydantic_version.startswith('1.'):
         print("[INFO] Using Pydantic v1 compatibility mode")
     else:
         print("[INFO] Using Pydantic v2+ compatibility mode")
-except:
-    print("[WARNING] Could not detect Pydantic version")
+        
+    if langgraph_version.startswith('1.'):
+        print("[INFO] Using LangGraph v1.x compatibility mode")
+    else:
+        print("[INFO] Using LangGraph v0.x compatibility mode")
+        
+except Exception as e:
+    print(f"[WARNING] Could not detect versions: {e}")
 
 # Global browser state management
 class PlaywrightState:
@@ -440,30 +455,71 @@ async def execute_tools(state: AgentState) -> AgentState:
             
             if tool_func:
                 try:
-                    # Execute the async tool function with compatibility handling
+                    # LangGraph 1.0.2 + Pydantic 2.12.4 compatibility handling
+                    result = None
+                    error_occurred = False
+                    
+                    # Method 1: Try direct function call (LangGraph 1.0.2 preferred)
                     try:
-                        # Try standard tool invocation first
-                        result = await tool_func.ainvoke(args)
-                    except AttributeError as ae:
-                        if "model_dump" in str(ae):
-                            # Handle Pydantic v1/v2 compatibility issue
-                            # Call the tool function directly
+                        if hasattr(tool_func, 'func'):
                             result = await tool_func.func(**args)
                         else:
-                            raise ae
-                    except Exception as tool_error:
-                        # Try alternative invocation methods
-                        try:
-                            result = await tool_func.func(**args) 
-                        except:
-                            # Final fallback - direct function call
                             result = await tool_func(**args)
+                    except Exception as direct_error:
+                        if "model_dump" in str(direct_error):
+                            print(f"[DEBUG] Method 1 failed with model_dump error: {direct_error}")
+                        error_occurred = True
                     
-                    tool_results.append(f"✅ {tool_name}: {result}")
+                    # Method 2: Try ainvoke if direct call failed
+                    if result is None and error_occurred:
+                        try:
+                            result = await tool_func.ainvoke(args)
+                        except AttributeError as ae:
+                            if "model_dump" in str(ae):
+                                print(f"[DEBUG] Method 2 failed with model_dump error: {ae}")
+                                # Try with empty input for LangGraph 1.0.2
+                                try:
+                                    from langchain_core.tools import ToolException
+                                    result = await tool_func.func(**args)
+                                except:
+                                    pass
+                            else:
+                                raise ae
+                        except Exception as invoke_error:
+                            if "model_dump" not in str(invoke_error):
+                                raise invoke_error
+                    
+                    # Method 3: Final fallback - create minimal input object
+                    if result is None:
+                        try:
+                            # For LangGraph 1.0.2, try creating a simple input wrapper
+                            class SimpleInput:
+                                def __init__(self, **kwargs):
+                                    for k, v in kwargs.items():
+                                        setattr(self, k, v)
+                                
+                                def dict(self):
+                                    return {k: v for k, v in self.__dict__.items()}
+                                
+                                def model_dump(self):
+                                    return self.dict()
+                            
+                            simple_input = SimpleInput(**args)
+                            result = await tool_func.ainvoke(simple_input)
+                        except Exception as final_error:
+                            print(f"[DEBUG] All methods failed. Final error: {final_error}")
+                            raise final_error
+                    
+                    if result is not None:
+                        tool_results.append(f"✅ {tool_name}: {result}")
+                    else:
+                        tool_results.append(f"❌ {tool_name}: No result returned")
+                        
                 except Exception as e:
                     error_msg = str(e)
                     if "model_dump" in error_msg:
-                        tool_results.append(f"❌ {tool_name}: Pydantic compatibility error - {error_msg}")
+                        tool_results.append(f"❌ {tool_name}: LangGraph 1.0.2 + Pydantic 2.12.4 compatibility issue - {error_msg}")
+                        print(f"[ERROR] Full error details for debugging: {e}")
                     else:
                         tool_results.append(f"❌ {tool_name}: Error - {error_msg}")
             else:
