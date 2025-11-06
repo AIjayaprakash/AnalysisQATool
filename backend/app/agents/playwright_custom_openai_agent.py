@@ -13,9 +13,12 @@ from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
 
-# LangGraph and LangChain imports - with model_dump compatibility fixes
+# LangGraph and LangChain imports - with tool decorators and LLM binding
 from langgraph.graph import StateGraph, END
+from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langchain_core.tools import tool
+from langchain_core.language_models.base import BaseLanguageModel
 
 # Custom OpenAI imports
 from openai import OpenAI
@@ -90,23 +93,18 @@ class PlaywrightState:
 # Global playwright state
 pw_state = PlaywrightState()
 
-# Agent State with model_dump compatibility fixes
-class AgentState(TypedDict):
-    messages: List[BaseMessage]
-    test_plan: str
-    current_step: int
-    total_steps: int
-    results: List[Dict[str, Any]]
-    errors: List[str]
-    is_complete: bool
-    max_iterations: int
-    browser_config: Dict[str, Any]
+# Using LangGraph's ReAct agent - no custom state needed
 
-# OUTPUT PARSER APPROACH - Direct Functions (NO @tool decorators)
-# This completely eliminates model_dump serialization issues
+# TOOL DECORATOR APPROACH - Using @tool decorators with LangChain compatibility
+# This uses proper LangChain tool integration
 
-async def pw_navigate(url: str) -> str:
-    """Navigate browser to a URL"""
+@tool
+async def playwright_navigate(url: str) -> str:
+    """Navigate browser to a URL. This will open a visible browser window.
+    
+    Args:
+        url: The full URL to navigate to (e.g., https://example.com)
+    """
     try:
         if not pw_state.is_initialized:
             await pw_state.initialize(headless=False)
@@ -117,8 +115,14 @@ async def pw_navigate(url: str) -> str:
     except Exception as e:
         return f"❌ Failed to navigate to {url}: {str(e)}"
 
-async def pw_click(selector: str, element_description: str = "") -> str:
-    """Click an element on the page"""
+@tool
+async def playwright_click(selector: str, element_description: str = "") -> str:
+    """Click an element on the page by CSS selector, XPath, or text.
+    
+    Args:
+        selector: CSS selector, XPath (prefix with //), or text content (prefix with text=)
+        element_description: Optional description of the element for clarity
+    """
     try:
         if not pw_state.is_initialized:
             return "❌ Browser not initialized. Please navigate to a page first."
@@ -135,8 +139,15 @@ async def pw_click(selector: str, element_description: str = "") -> str:
     except Exception as e:
         return f"❌ Failed to click element {selector}: {str(e)}"
 
-async def pw_type(selector: str, text: str, element_description: str = "") -> str:
-    """Type text into an input field"""
+@tool
+async def playwright_type(selector: str, text: str, element_description: str = "") -> str:
+    """Type text into an input field.
+    
+    Args:
+        selector: CSS selector for the input field
+        text: Text to type into the field
+        element_description: Optional description of the input field
+    """
     try:
         if not pw_state.is_initialized:
             return "❌ Browser not initialized. Please navigate to a page first."
@@ -147,8 +158,13 @@ async def pw_type(selector: str, text: str, element_description: str = "") -> st
     except Exception as e:
         return f"❌ Failed to type into {selector}: {str(e)}"
 
-async def pw_screenshot(filename: str = "screenshot.png") -> str:
-    """Take a screenshot of the current page"""
+@tool
+async def playwright_screenshot(filename: str = "screenshot.png") -> str:
+    """Take a screenshot of the current page.
+    
+    Args:
+        filename: Name of the screenshot file (default: screenshot.png)
+    """
     try:
         if not pw_state.is_initialized:
             return "❌ Browser not initialized. Please navigate to a page first."
@@ -159,8 +175,14 @@ async def pw_screenshot(filename: str = "screenshot.png") -> str:
     except Exception as e:
         return f"❌ Failed to take screenshot: {str(e)}"
 
-async def pw_wait_for_selector(selector: str, timeout: int = 5000) -> str:
-    """Wait for an element to appear on the page"""
+@tool
+async def playwright_wait_for_selector(selector: str, timeout: int = 5000) -> str:
+    """Wait for an element to appear on the page.
+    
+    Args:
+        selector: CSS selector to wait for
+        timeout: Maximum time to wait in milliseconds (default: 5000)
+    """
     try:
         if not pw_state.is_initialized:
             return "❌ Browser not initialized. Please navigate to a page first."
@@ -170,8 +192,14 @@ async def pw_wait_for_selector(selector: str, timeout: int = 5000) -> str:
     except Exception as e:
         return f"❌ Element {selector} did not appear within {timeout}ms: {str(e)}"
 
-async def pw_wait_for_text(text: str, timeout: int = 5000) -> str:
-    """Wait for specific text to appear on the page"""
+@tool
+async def playwright_wait_for_text(text: str, timeout: int = 5000) -> str:
+    """Wait for specific text to appear on the page.
+    
+    Args:
+        text: Text content to wait for
+        timeout: Maximum time to wait in milliseconds (default: 5000)
+    """
     try:
         if not pw_state.is_initialized:
             return "❌ Browser not initialized. Please navigate to a page first."
@@ -181,8 +209,9 @@ async def pw_wait_for_text(text: str, timeout: int = 5000) -> str:
     except Exception as e:
         return f"❌ Text '{text}' did not appear within {timeout}ms: {str(e)}"
 
-async def pw_get_page_content() -> str:
-    """Get the current page content and structure"""
+@tool
+async def playwright_get_page_content() -> str:
+    """Get the current page content and structure for analysis."""
     try:
         if not pw_state.is_initialized:
             return "❌ Browser not initialized. Please navigate to a page first."
@@ -216,8 +245,13 @@ async def pw_get_page_content() -> str:
     except Exception as e:
         return f"❌ Failed to get page content: {str(e)}"
 
-async def pw_execute_javascript(script: str) -> str:
-    """Execute JavaScript code in the browser context"""
+@tool
+async def playwright_execute_javascript(script: str) -> str:
+    """Execute JavaScript code in the browser context.
+    
+    Args:
+        script: JavaScript code to execute
+    """
     try:
         if not pw_state.is_initialized:
             return "❌ Browser not initialized. Please navigate to a page first."
@@ -227,41 +261,45 @@ async def pw_execute_javascript(script: str) -> str:
     except Exception as e:
         return f"❌ Failed to execute JavaScript: {str(e)}"
 
-async def pw_close_browser() -> str:
-    """Close the browser and clean up resources"""
+@tool
+async def playwright_close_browser() -> str:
+    """Close the browser and clean up resources."""
     try:
         await pw_state.cleanup()
         return "✅ Browser closed successfully"
     except Exception as e:
         return f"❌ Failed to close browser: {str(e)}"
 
-# Function mapping for output parser
-PLAYWRIGHT_FUNCTIONS = {
-    "pw_navigate": pw_navigate,
-    "pw_click": pw_click,
-    "pw_type": pw_type,
-    "pw_screenshot": pw_screenshot,
-    "pw_wait_for_selector": pw_wait_for_selector,
-    "pw_wait_for_text": pw_wait_for_text,
-    "pw_get_page_content": pw_get_page_content,
-    "pw_execute_javascript": pw_execute_javascript,
-    "pw_close_browser": pw_close_browser,
-}
+# Collect all Playwright tools for LangGraph agent
+playwright_tools = [
+    playwright_navigate,
+    playwright_click,
+    playwright_type,
+    playwright_screenshot,
+    playwright_wait_for_selector,
+    playwright_wait_for_text,
+    playwright_get_page_content,
+    playwright_execute_javascript,
+    playwright_close_browser,
+]
 
-# Add function aliases for compatibility
-async def playwright_navigate(url: str) -> str:
-    """Navigate to a URL - compatibility wrapper for pw_navigate"""
-    return await pw_navigate(url)
+print(f"[OK] Created {len(playwright_tools)} Playwright automation tools with @tool decorators")
 
-# Add to function mapping with both names
-PLAYWRIGHT_FUNCTIONS["playwright_navigate"] = playwright_navigate
+# Custom OpenAI LLM wrapper for LangChain compatibility
+from langchain_core.language_models.llms import LLM
+from langchain_core.outputs import LLMResult, Generation
 
-print(f"[OK] Created {len(PLAYWRIGHT_FUNCTIONS)} Playwright automation tools")
-
-# Custom OpenAI Client Setup (YOUR CONFIGURATION)
-class CustomOpenAIClient:
-    def __init__(self, api_key: str, model: str = "gpt-4o", gateway_url: str = None):
-        self.api_key = api_key
+class CustomOpenAILLM(LLM):
+    """Custom LLM wrapper for your OpenAI gateway that works with LangChain tools and agents"""
+    
+    api_key: str = "placeholder-key"
+    model: str = "gpt-4o"
+    gateway_url: str = None
+    client: Any = None
+    
+    def __init__(self, api_key: str = "placeholder-key", model: str = "gpt-4o", gateway_url: str = None, **kwargs):
+        super().__init__(**kwargs)
+        self.api_key = api_key or "placeholder-key"
         self.model = model
         
         if gateway_url:
@@ -275,13 +313,43 @@ class CustomOpenAIClient:
             base_url=self.gateway_url,
         )
         
-        print(f"[INFO] Custom OpenAI Client initialized:")
+        print(f"[INFO] Custom OpenAI LLM initialized:")
         print(f"  Model: {self.model}")
         print(f"  Gateway URL: {self.gateway_url}")
     
-    def invoke(self, messages: List[BaseMessage]) -> str:
-        """Invoke the custom OpenAI client with LangChain messages"""
+    @property
+    def _llm_type(self) -> str:
+        return "custom_openai_gateway"
+    
+    def _call(self, prompt: str, stop: Optional[List[str]] = None, **kwargs) -> str:
+        """Call the custom OpenAI gateway with a prompt"""
+        try:
+            chat_completion = self.client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model=self.model,
+                extra_headers={
+                    "api-key": self.api_key, 
+                    "ai-gateway-version": "v2"
+                },
+            )
+            
+            return chat_completion.choices[0].message.content
+            
+        except Exception as e:
+            print(f"[ERROR] Custom OpenAI LLM error: {e}")
+            return f"Error calling custom OpenAI LLM: {str(e)}"
+    
+    def _generate(self, prompts: List[str], stop: Optional[List[str]] = None, **kwargs) -> LLMResult:
+        """Generate responses for multiple prompts"""
+        generations = []
+        for prompt in prompts:
+            response = self._call(prompt, stop=stop, **kwargs)
+            generations.append([Generation(text=response)])
         
+        return LLMResult(generations=generations)
+    
+    def invoke(self, messages: List[BaseMessage]) -> AIMessage:
+        """Invoke with LangChain messages - returns AIMessage for compatibility"""
         # Convert LangChain messages to OpenAI format
         openai_messages = []
         for msg in messages:
@@ -292,13 +360,11 @@ class CustomOpenAIClient:
             elif isinstance(msg, SystemMessage):
                 openai_messages.append({"role": "system", "content": str(msg.content)})
             else:
-                # Fallback for any other message type
                 openai_messages.append({"role": "user", "content": str(msg.content)})
         
         print(f"[DEBUG] Sending {len(openai_messages)} messages to custom OpenAI gateway")
         
         try:
-            # Use your exact client completion call with custom headers
             chat_completion = self.client.chat.completions.create(
                 messages=openai_messages,
                 model=self.model,
@@ -308,267 +374,210 @@ class CustomOpenAIClient:
                 },
             )
             
-            # Extract content from response
             response_content = chat_completion.choices[0].message.content
             print(f"[DEBUG] Received response from custom OpenAI gateway: {len(response_content)} chars")
             
-            return response_content
+            # Return proper AIMessage for LangChain compatibility
+            return AIMessage(content=response_content)
             
         except Exception as e:
-            print(f"[ERROR] Custom OpenAI client error: {e}")
-            return f"Error calling custom OpenAI client: {str(e)}"
+            print(f"[ERROR] Custom OpenAI LLM error: {e}")
+            return AIMessage(content=f"Error calling custom OpenAI LLM: {str(e)}")
 
-# Initialize your custom OpenAI client
-# You'll need to set these values
+# Initialize your custom OpenAI LLM
 CUSTOM_API_KEY = os.getenv("CUSTOM_OPENAI_KEY", "Your Key Here")
 CUSTOM_MODEL = "gpt-4o"
 CUSTOM_GATEWAY_URL = f"https://gateway.ai-npe.humana.com/openai/deployments/{CUSTOM_MODEL}"
 
-# Global custom client
-custom_llm = CustomOpenAIClient(
-    api_key=CUSTOM_API_KEY,
+# Create LLM instance (use placeholder if no key provided)
+custom_llm = CustomOpenAILLM(
+    api_key=CUSTOM_API_KEY or "placeholder-key",
     model=CUSTOM_MODEL,
     gateway_url=CUSTOM_GATEWAY_URL
 )
 
-# Agent Nodes
-def parse_test_request(state: AgentState) -> AgentState:
-    """Parse user's test request and create execution plan"""
-    messages = state["messages"]
+# Note: Custom LLM doesn't support bind_tools, we'll handle tool calls manually
+
+print(f"[INFO] Custom OpenAI LLM bound with {len(playwright_tools)} Playwright tools")
+
+# Create a hybrid approach: @tool decorators with manual parsing for custom OpenAI compatibility
+from typing import TypedDict, Annotated
+import re
+import json
+
+class PlaywrightAgentState(TypedDict):
+    """State for the Playwright agent with @tool decorators"""
+    messages: Annotated[List[BaseMessage], add_messages]
+    current_step: int
+    max_iterations: int
+    is_complete: bool
+
+def create_playwright_agent():
+    """Create Playwright agent using @tool decorators with custom OpenAI LLM and output parsing fallback"""
     
-    # Using Custom OpenAI with TOOL_CALL format
-    system_prompt = """You are an expert QA automation engineer using Playwright for web automation.
+    def call_model_with_tools(state: PlaywrightAgentState):
+        """Call the model and request tool usage"""
+        system_message = SystemMessage(content="""You are an expert QA automation engineer using Playwright for web automation.
 
-CRITICAL: You MUST specify Playwright actions using the TOOL_CALL format below. The browser will be VISIBLE.
+CRITICAL: The browser will be VISIBLE during automation. You MUST use the available tools to complete the task.
 
-Available Playwright tools (using OUTPUT PARSER approach):
-- playwright_navigate(url) - Navigate to a website (opens visible browser - supports Chromium, Firefox, WebKit, Edge)
-- playwright_click(selector, element_description) - Click elements  
-- playwright_type(selector, text, element_description) - Type into input fields
-- playwright_screenshot(filename) - Take screenshots
-- playwright_wait_for_selector(selector, timeout) - Wait for elements
-- playwright_wait_for_text(text, timeout) - Wait for text to appear
-- playwright_get_page_content() - Get page structure and content
-- playwright_execute_javascript(script) - Run JavaScript
-- playwright_close_browser() - Close browser when done
+Available Playwright tools:
+- playwright_navigate(url): Navigate to a website (opens visible browser)
+- playwright_click(selector, element_description): Click elements on the page
+- playwright_type(selector, text, element_description): Type text into input fields  
+- playwright_screenshot(filename): Take screenshots for documentation
+- playwright_wait_for_selector(selector, timeout): Wait for elements to appear
+- playwright_wait_for_text(text, timeout): Wait for text to appear
+- playwright_get_page_content(): Get page structure and content
+- playwright_execute_javascript(script): Run JavaScript
+- playwright_close_browser(): Close browser when done
 
-Supported browser types: chromium (default), firefox, webkit, edge
+TOOL USAGE FORMAT:
+To use a tool, respond with:
+USE_TOOL: tool_name
+ARGS: {"arg1": "value1", "arg2": "value2"}
 
-EXECUTION FORMAT:
-Use this exact format to call tools:
-
-TOOL_CALL: playwright_navigate
+Example:
+USE_TOOL: playwright_navigate  
 ARGS: {"url": "https://example.com"}
 
-TOOL_CALL: playwright_screenshot
+USE_TOOL: playwright_screenshot
 ARGS: {"filename": "step1.png"}
 
 EXECUTION RULES:
-1. ALWAYS start with TOOL_CALL: playwright_navigate
-2. Use the exact TOOL_CALL format shown above
-3. After tool results, evaluate if more steps are needed
-4. Always close browser when complete: TOOL_CALL: playwright_close_browser
+1. ALWAYS start with USE_TOOL: playwright_navigate
+2. Use USE_TOOL format for ALL actions
+3. Take screenshots to document progress
+4. ALWAYS end with USE_TOOL: playwright_close_browser
+5. Work step by step and explain your actions
 
-REMEMBER: Use TOOL_CALL format for actions - browser will be visible!"""
-    
-    # Build messages based on current step
-    if state["current_step"] == 0:
-        planning_messages = [
-            SystemMessage(content=system_prompt),
-            *messages,
-            HumanMessage(content="""Create and execute a detailed test plan using the Playwright tools.
-
-IMPORTANT: 
-- The browser will be VISIBLE during automation so you can see what's happening
-- Start by calling playwright_navigate to open the target website
-- Use playwright_get_page_content() to understand page structure
-- Take screenshots to document steps
-- Close the browser when done
-
-Execute the test now using tool calls.""")
-        ]
-    else:
-        planning_messages = [
-            SystemMessage(content=system_prompt),
-            *messages,
-            HumanMessage(content="Based on the results above, determine next steps. If test is complete, close the browser and provide summary. Otherwise, continue with tool calls.")
-        ]
-    
-    # Use your custom OpenAI client
-    response_content = custom_llm.invoke(planning_messages)
-    
-    # CRITICAL FIX for Custom OpenAI model_dump issue: Ensure proper AIMessage
-    print(f"[DEBUG] Custom OpenAI response type: {type(response_content)}")
-    
-    # Since our custom client returns a string, wrap it in AIMessage
-    if isinstance(response_content, str):
-        state["messages"].append(AIMessage(content=response_content))
-    else:
-        # Fallback
-        state["messages"].append(AIMessage(content=str(response_content)))
-    
-    return state
-
-async def execute_tools(state: AgentState) -> AgentState:
-    """OUTPUT PARSER APPROACH: Execute tool calls using direct function calls (no @tool decorators)
-    This completely eliminates model_dump serialization issues by bypassing Pydantic altogether"""
-    last_message = state["messages"][-1]
-    
-    # Parse TOOL_CALL format (works with Custom OpenAI)
-    content = str(last_message.content) if hasattr(last_message, 'content') else str(last_message)
-    
-    import re
-    import json
-    
-    tool_calls = []
-    pattern = r'TOOL_CALL:\s*([^\n]+)\s*\nARGS:\s*(\{[^}]*\})'
-    matches = re.findall(pattern, content, re.MULTILINE | re.DOTALL)
-    
-    for tool_name, args_str in matches:
-        tool_name = tool_name.strip()
-        try:
-            args = json.loads(args_str) if args_str.strip() else {}
-            tool_calls.append({"name": tool_name, "args": args})
-        except json.JSONDecodeError:
-            print(f"[ERROR] Failed to parse args for {tool_name}: {args_str}")
-            continue
-    
-    if tool_calls:
-        tool_call_names = [tc["name"] for tc in tool_calls]
-        print(f"  -> Step {state['current_step']}: Executing {len(tool_calls)} Playwright tool(s): {', '.join(tool_call_names)}")
+Begin the automation task now using the tools.""")
         
-        tool_results = []
+        messages = [system_message] + state["messages"]
         
-        for tool_call in tool_calls:
-            tool_name = tool_call["name"]
-            args = tool_call["args"]
+        # Use our custom OpenAI LLM
+        response = custom_llm.invoke(messages)
+        return {"messages": [response], "current_step": state["current_step"] + 1}
+
+    async def execute_tool_calls(state: PlaywrightAgentState):
+        """Parse and execute tool calls from model response"""
+        last_message = state["messages"][-1]
+        content = str(last_message.content) if hasattr(last_message, 'content') else str(last_message)
+        
+        # Parse USE_TOOL format
+        tool_pattern = r'USE_TOOL:\s*([^\n]+)\s*\nARGS:\s*(\{[^}]*\})'
+        tool_matches = re.findall(tool_pattern, content, re.MULTILINE | re.DOTALL)
+        
+        if tool_matches:
+            tool_results = []
             
-            # OUTPUT PARSER: Map tool names to direct functions  
-            tool_name_mapping = {
-                "playwright_navigate": "pw_navigate",
-                "playwright_click": "pw_click", 
-                "playwright_type": "pw_type",
-                "playwright_screenshot": "pw_screenshot",
-                "playwright_wait_for_selector": "pw_wait_for_selector",
-                "playwright_wait_for_text": "pw_wait_for_text",
-                "playwright_get_page_content": "pw_get_page_content",
-                "playwright_execute_javascript": "pw_execute_javascript",
-                "playwright_close_browser": "pw_close_browser",
-            }
-            
-            # Get the actual function name
-            actual_func_name = tool_name_mapping.get(tool_name, tool_name)
-            tool_func = PLAYWRIGHT_FUNCTIONS.get(actual_func_name)
-            
-            if tool_func:
+            for tool_name, args_str in tool_matches:
+                tool_name = tool_name.strip()
                 try:
-                    # DIRECT FUNCTION CALL - No Pydantic, no model_dump, no serialization issues
-                    result = await tool_func(**args)
-                    tool_results.append(f"✅ {tool_name}: {result}")
+                    args = json.loads(args_str) if args_str.strip() else {}
                     
-                except Exception as e:
-                    error_msg = f"❌ Error executing {tool_name}: {str(e)}"
-                    tool_results.append(f"Tool: {tool_name}\nResult: {error_msg}")
+                    # Find and execute the tool
+                    tool_func = None
+                    for tool in playwright_tools:
+                        if tool.name == tool_name:
+                            tool_func = tool
+                            break
+                    
+                    if tool_func:
+                        try:
+                            # Call the async tool function
+                            result = await tool_func.func(**args)
+                            tool_results.append(f"✅ {tool_name}: {result}")
+                            print(f"[TOOL] {tool_name} -> {result}")
+                        except Exception as e:
+                            error_msg = f"❌ {tool_name} error: {str(e)}"
+                            tool_results.append(error_msg)
+                            print(f"[ERROR] {error_msg}")
+                    else:
+                        error_msg = f"❌ Tool '{tool_name}' not found"
+                        tool_results.append(error_msg)
+                        print(f"[ERROR] {error_msg}")
+                        
+                except json.JSONDecodeError as e:
+                    error_msg = f"❌ Failed to parse args for {tool_name}: {args_str}"
+                    tool_results.append(error_msg)
                     print(f"[ERROR] {error_msg}")
-            else:
-                error_msg = f"❌ Tool '{tool_name}' not found"
-                tool_results.append(f"Tool: {tool_name}\nResult: {error_msg}")
-                print(f"[ERROR] {error_msg}")
+            
+            # Return tool results
+            result_content = "Tool execution results:\n" + "\n".join(tool_results)
+            return {"messages": [AIMessage(content=result_content)]}
         
-        # Create result message with proper AIMessage object
-        combined_result = "Tool execution results:\n" + "\n".join(tool_results)
-        result_message = AIMessage(content=combined_result)
-        
-        state["messages"].append(result_message)
-        state["results"].append({
-            "step": state["current_step"],
-            "tool_calls": len(tool_calls),
-            "tool_names": tool_call_names,
-            "timestamp": datetime.now().isoformat()
-        })
-        state["current_step"] += 1
-    else:
-        state["is_complete"] = True
-    
-    # Check iteration limit
-    if state["current_step"] >= state["max_iterations"]:
-        state["is_complete"] = True
-        state["errors"].append(f"Max iterations ({state['max_iterations']}) reached")
-    
-    return state
+        # No tools found, mark as complete
+        return {"messages": [], "is_complete": True}
 
-def should_continue(state: AgentState) -> str:
-    """Determine if we should continue or end"""
-    
-    print(f"\n[DEBUG] should_continue - Step {state['current_step']}, Complete: {state.get('is_complete')}")
-    
-    if state.get("is_complete"):
-        print("[DEBUG] -> END (marked complete)")
-        return END
-    
-    if state["current_step"] >= state["max_iterations"]:
-        print("[DEBUG] -> END (max iterations)")
-        return END
-    
-    last_message = state["messages"][-1]
-    print(f"[DEBUG] Last message type: {type(last_message).__name__}")
-    
-    # Check for TOOL_CALL format
-    if hasattr(last_message, 'content'):
-        content = str(last_message.content)
-        if "TOOL_CALL:" in content:
-            print("[DEBUG] -> execute_tools (TOOL_CALL format)")
+    def should_continue(state: PlaywrightAgentState) -> str:
+        """Decide whether to continue or end"""
+        
+        # Check completion conditions
+        if state.get("is_complete", False):
+            return END
+            
+        if state["current_step"] >= state["max_iterations"]:
+            return END
+        
+        last_message = state["messages"][-1]
+        content = str(last_message.content) if hasattr(last_message, 'content') else str(last_message)
+        
+        # Check for tool calls
+        if "USE_TOOL:" in content:
             return "execute_tools"
-    
-    # Continue after tool results
-    if isinstance(last_message, AIMessage) and "Tool execution results:" in str(last_message.content):
-        print("[DEBUG] -> parse_request (after tool results)")
-        return "parse_request"
-    
-    print("[DEBUG] -> END (no tool calls)")
-    return END
+        
+        # Check for completion indicators
+        if any(phrase in content.lower() for phrase in ["browser closed", "task complete", "automation complete"]):
+            return END
+        
+        # Continue with model
+        return "call_model"
 
-def create_playwright_agent():
-    """Create the LangGraph Playwright automation agent"""
-    workflow = StateGraph(AgentState)
+    # Build the StateGraph
+    workflow = StateGraph(PlaywrightAgentState)
     
     # Add nodes
-    workflow.add_node("parse_request", parse_test_request)
-    workflow.add_node("execute_tools", execute_tools)
+    workflow.add_node("call_model", call_model_with_tools)
+    workflow.add_node("execute_tools", execute_tool_calls)
     
     # Set entry point
-    workflow.set_entry_point("parse_request")
+    workflow.set_entry_point("call_model")
     
     # Add conditional edges
     workflow.add_conditional_edges(
-        "parse_request",
+        "call_model",
         should_continue,
         {
             "execute_tools": "execute_tools",
-            "parse_request": "parse_request",
+            "call_model": "call_model",
             END: END
         }
     )
     
     workflow.add_conditional_edges(
-        "execute_tools", 
+        "execute_tools",
         should_continue,
         {
-            "parse_request": "parse_request",
+            "call_model": "call_model",
             END: END
         }
     )
     
-    return workflow.compile()
+    # Compile the graph
+    agent = workflow.compile()
+    
+    print("[INFO] Created Playwright agent with @tool decorators and custom OpenAI compatibility")
+    return agent
 
 # Main execution function
 async def run_playwright_automation(test_prompt: str, max_iterations: int = 1, browser_config: Dict[str, Any] = None) -> Dict[str, Any]:
     """
-    Run Playwright automation test with visible browser using Custom OpenAI Gateway.
+    Run Playwright automation test with visible browser using Custom OpenAI Gateway and LangGraph ReAct agent.
     
     Args:
         test_prompt: Natural language test description
-        max_iterations: Max plan-execute cycles
+        max_iterations: Max plan-execute cycles (not directly used by ReAct agent)
         browser_config: Browser configuration (headless, browser_type, etc.)
         
     Returns:
@@ -582,38 +591,35 @@ async def run_playwright_automation(test_prompt: str, max_iterations: int = 1, b
             "browser_type": "chromium"
         }
     
-    # Initialize state with proper message objects (fix model_dump issue)
-    # CRITICAL: Ensure initial message is proper HumanMessage object
-    initial_message = HumanMessage(content=str(test_prompt))
+    # Update global browser config
+    global BROWSER_TYPE, HEADLESS
+    BROWSER_TYPE = browser_config.get("browser_type", "chromium")
+    HEADLESS = browser_config.get("headless", False)
     
-    initial_state = AgentState(
-        messages=[initial_message],
-        test_plan="",
-        current_step=0,
-        total_steps=0,
-        results=[],
-        errors=[],
-        is_complete=False,
-        max_iterations=max_iterations,
-        browser_config=browser_config
-    )
-    
-    print(f"\n[🎭 PLAYWRIGHT Custom OpenAI] Starting automation test: '{test_prompt}'")
+    print(f"\n[🎭 PLAYWRIGHT Custom OpenAI] Starting ReAct automation test: '{test_prompt}'")
     print(f"[🎭 PLAYWRIGHT Custom OpenAI] Browser config: {browser_config}")
     print(f"[🎭 PLAYWRIGHT Custom OpenAI] Max iterations: {max_iterations}")
-    print(f"[DEBUG] Initial state message type: {type(initial_state['messages'][0])}")
     
-    # Create and run agent
+    # Create the ReAct agent
     agent = create_playwright_agent()
     
     try:
-        final_state = await agent.ainvoke(initial_state)
+        # Run the Playwright agent with proper state
+        result = await agent.ainvoke({
+            "messages": [HumanMessage(content=test_prompt)],
+            "current_step": 0,
+            "max_iterations": max_iterations,
+            "is_complete": False
+        })
         
-        print(f"\n[🎭 PLAYWRIGHT Custom OpenAI] Test completed:")
-        print(f"  - Steps executed: {final_state['current_step']}")
-        print(f"  - Is complete: {final_state.get('is_complete', False)}")
-        print(f"  - Total messages: {len(final_state['messages'])}")
-        print(f"  - Errors: {final_state.get('errors', [])}")
+        print(f"\n[🎭 PLAYWRIGHT Custom OpenAI] ReAct Agent Test completed:")
+        
+        # Extract messages from result
+        messages = result.get("messages", [])
+        tool_calls = sum(1 for msg in messages if hasattr(msg, '__class__') and 'Tool' in msg.__class__.__name__)
+        
+        print(f"  - Total messages: {len(messages)}")
+        print(f"  - Tool calls: {tool_calls}")
         
         # Ensure browser cleanup
         try:
@@ -624,18 +630,23 @@ async def run_playwright_automation(test_prompt: str, max_iterations: int = 1, b
         return {
             "status": "success",
             "test_prompt": test_prompt,
-            "steps_executed": final_state["current_step"],
-            "results": final_state["results"],
-            "errors": final_state["errors"],
+            "tool_calls": tool_calls,
+            "total_messages": len(messages),
             "browser_config": browser_config,
             "messages": [
-                {"role": getattr(m, 'type', 'unknown'), "content": str(getattr(m, 'content', m))}
-                for m in final_state["messages"]
-            ]
+                {
+                    "role": "assistant" if isinstance(msg, AIMessage) else 
+                           "user" if isinstance(msg, HumanMessage) else
+                           "tool" if hasattr(msg, '__class__') and 'Tool' in msg.__class__.__name__ else "system",
+                    "content": str(msg.content) if hasattr(msg, 'content') else str(msg)
+                } 
+                for msg in messages
+            ],
+            "final_response": str(messages[-1].content) if messages and hasattr(messages[-1], 'content') else "No response"
         }
         
     except Exception as e:
-        print(f"[❌ PLAYWRIGHT Custom OpenAI] Agent error: {e}")
+        print(f"[❌ PLAYWRIGHT Custom OpenAI] ReAct Agent error: {e}")
         
         # Check if it's a model_dump error
         if 'model_dump' in str(e):
@@ -652,8 +663,9 @@ async def run_playwright_automation(test_prompt: str, max_iterations: int = 1, b
             "status": "error", 
             "test_prompt": test_prompt,
             "error": str(e),
-            "steps_executed": initial_state["current_step"],
-            "results": initial_state["results"]
+            "tool_calls": 0,
+            "total_messages": 0,
+            "final_response": str(e)
         }
 
 # Synchronous wrapper
@@ -673,7 +685,7 @@ def run_test_with_custom_openai(prompt: str, max_iterations: int = 10, headless:
     if api_key:
         global custom_llm
         gateway_url = f"https://gateway.ai-npe.humana.com/openai/deployments/{model}"
-        custom_llm = CustomOpenAIClient(
+        custom_llm = CustomOpenAILLM(
             api_key=api_key,
             model=model,
             gateway_url=gateway_url
