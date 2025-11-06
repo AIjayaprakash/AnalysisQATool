@@ -1,9 +1,8 @@
 """
-Complete LangGraph Playwright Automation Agent - Direct Playwright Integration
-Uses Playwright framework directly (not MCP) for web automation testing.
+Complete LangGraph Playwright Automation Agent - OpenAI Version
+Uses Playwright framework directly with OpenAI ChatGPT for LLM calls.
 
-This agent creates custom LangGraph tools that use Playwright directly,
-allowing for visible browser automation without VS Code MCP dependency.
+This version specifically handles model_dump issues with OpenAI + LangGraph + Pydantic compatibility.
 """
 
 import os
@@ -17,19 +16,25 @@ load_dotenv()
 # LangGraph and LangChain imports - with model_dump compatibility fixes
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
-from langchain_core.tools import tool
+
+# OpenAI imports
+from langchain_openai import ChatOpenAI
 
 # Playwright imports
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 
-print("[OK] Playwright Agent with OUTPUT PARSER - No model_dump issues")
-print("  This version uses output parsing instead of tool serialization")
+print("[OK] Playwright Agent with OpenAI - OUTPUT PARSER approach")
+print("  This version fixes model_dump issues for OpenAI + LangGraph + Pydantic")
 
 # Version info
 try:
     import pydantic
+    import langchain
+    import openai
     pydantic_version = pydantic.__version__ if hasattr(pydantic, '__version__') else pydantic.VERSION
     print(f"[INFO] Pydantic version: {pydantic_version}")
+    print(f"[INFO] LangChain version: {langchain.__version__}")
+    print(f"[INFO] OpenAI version: {openai.__version__}")
     print("[INFO] Using OUTPUT PARSER approach to eliminate model_dump errors")
 except Exception as e:
     print(f"[WARNING] Could not detect versions: {e}")
@@ -245,7 +250,7 @@ PLAYWRIGHT_FUNCTIONS = {
     "pw_close_browser": pw_close_browser,
 }
 
-# Add missing navigate function alias for compatibility
+# Add function aliases for compatibility
 async def playwright_navigate(url: str) -> str:
     """Navigate to a URL - compatibility wrapper for pw_navigate"""
     return await pw_navigate(url)
@@ -253,28 +258,29 @@ async def playwright_navigate(url: str) -> str:
 # Add to function mapping with both names
 PLAYWRIGHT_FUNCTIONS["playwright_navigate"] = playwright_navigate
 
-# All tools now use direct functions without @tool decorators - accessed via PLAYWRIGHT_FUNCTIONS dict
-
 print(f"[OK] Created {len(PLAYWRIGHT_FUNCTIONS)} Playwright automation tools")
 
-# LLM Setup - Using Groq exclusively
-print("[INFO] Using Groq AI with llama-3.3-70b-versatile model")
-from langchain_groq import ChatGroq
+# OpenAI LLM Setup 
+print("[INFO] Using OpenAI ChatGPT with langchain_openai")
 
-if not os.getenv("GROQ_API_KEY"):
-    print("ERROR: GROQ_API_KEY not set. Please set your Groq API key in environment variables.")
-    print("You can get a free API key from: https://console.groq.com/keys")
-    raise ValueError("GROQ_API_KEY is required")
+if not os.getenv("OPENAI_API_KEY"):
+    print("ERROR: OPENAI_API_KEY not set. Please set your OpenAI API key in environment variables.")
+    print("You can get an API key from: https://platform.openai.com/api-keys")
+    raise ValueError("OPENAI_API_KEY is required")
 
-llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
-llm_with_tools = llm  # No tool fing for Groq - we use manual parsing
+# Initialize OpenAI LLM
+llm = ChatOpenAI(
+    model="gpt-4o-mini",  # Use gpt-4o-mini for cost efficiency, or change to "gpt-4o" for more advanced reasoning
+    temperature=0,
+    max_tokens=4000
+)
 
 # Agent Nodes
 def parse_test_request(state: AgentState) -> AgentState:
     """Parse user's test request and create execution plan"""
     messages = state["messages"]
     
-    # Using Groq with manual TOOL_CALL format
+    # Using OpenAI with TOOL_CALL format (works with both OpenAI and other providers)
     system_prompt = """You are an expert QA automation engineer using Playwright for web automation.
 
 CRITICAL: You MUST specify Playwright actions using the TOOL_CALL format below. The browser will be VISIBLE.
@@ -332,17 +338,25 @@ Execute the test now using tool calls.""")
             HumanMessage(content="Based on the results above, determine next steps. If test is complete, close the browser and provide summary. Otherwise, continue with tool calls.")
         ]
     
-    response = llm_with_tools.invoke(planning_messages)
+    # OpenAI invoke call
+    response = llm.invoke(planning_messages)
     
-    # Fix model_dump issue: Ensure response is proper AIMessage object
+    # CRITICAL FIX for OpenAI model_dump issue: Properly handle OpenAI response
+    print(f"[DEBUG] OpenAI response type: {type(response)}")
+    print(f"[DEBUG] OpenAI response has content attr: {hasattr(response, 'content')}")
+    
     if isinstance(response, str):
         # If response is string, wrap it in AIMessage
+        print("[DEBUG] Wrapping string response in AIMessage")
         state["messages"].append(AIMessage(content=response))
     elif hasattr(response, 'content'):
-        # If it's already a message object, use it directly
-        state["messages"].append(response)
+        # OpenAI typically returns BaseMessage with .content attribute
+        print("[DEBUG] Using response.content for AIMessage")
+        content_str = str(response.content) if response.content else ""
+        state["messages"].append(AIMessage(content=content_str))
     else:
-        # Fallback: convert to string and wrap
+        # Fallback: convert entire response to string and wrap
+        print("[DEBUG] Fallback: converting entire response to string")
         state["messages"].append(AIMessage(content=str(response)))
     
     return state
@@ -352,8 +366,8 @@ async def execute_tools(state: AgentState) -> AgentState:
     This completely eliminates model_dump serialization issues by bypassing Pydantic altogether"""
     last_message = state["messages"][-1]
     
-    # Parse Groq manual format
-    content = str(last_message.content) if hasattr(last_message, 'content') else ""
+    # Parse TOOL_CALL format (works with OpenAI and other providers)
+    content = str(last_message.content) if hasattr(last_message, 'content') else str(last_message)
     
     import re
     import json
@@ -413,7 +427,7 @@ async def execute_tools(state: AgentState) -> AgentState:
                 tool_results.append(f"Tool: {tool_name}\nResult: {error_msg}")
                 print(f"[ERROR] {error_msg}")
         
-        # Create result message  
+        # Create result message with proper AIMessage object
         combined_result = "Tool execution results:\n" + "\n".join(tool_results)
         result_message = AIMessage(content=combined_result)
         
@@ -451,11 +465,11 @@ def should_continue(state: AgentState) -> str:
     last_message = state["messages"][-1]
     print(f"[DEBUG] Last message type: {type(last_message).__name__}")
     
-    # Check for Groq TOOL_CALL format
+    # Check for TOOL_CALL format
     if hasattr(last_message, 'content'):
         content = str(last_message.content)
         if "TOOL_CALL:" in content:
-            print("[DEBUG] -> execute_tools (Groq TOOL_CALL format)")
+            print("[DEBUG] -> execute_tools (TOOL_CALL format)")
             return "execute_tools"
     
     # Continue after tool results
@@ -502,7 +516,7 @@ def create_playwright_agent():
 # Main execution function
 async def run_playwright_automation(test_prompt: str, max_iterations: int = 1, browser_config: Dict[str, Any] = None) -> Dict[str, Any]:
     """
-    Run Playwright automation test with visible browser.
+    Run Playwright automation test with visible browser using OpenAI.
     
     Args:
         test_prompt: Natural language test description
@@ -521,8 +535,11 @@ async def run_playwright_automation(test_prompt: str, max_iterations: int = 1, b
         }
     
     # Initialize state with proper message objects (fix model_dump issue)
+    # CRITICAL: Ensure initial message is proper HumanMessage object
+    initial_message = HumanMessage(content=str(test_prompt))
+    
     initial_state = AgentState(
-        messages=[HumanMessage(content=str(test_prompt))],  # Ensure content is string
+        messages=[initial_message],
         test_plan="",
         current_step=0,
         total_steps=0,
@@ -533,9 +550,10 @@ async def run_playwright_automation(test_prompt: str, max_iterations: int = 1, b
         browser_config=browser_config
     )
     
-    print(f"\n[🎭 PLAYWRIGHT] Starting automation test: '{test_prompt}'")
-    print(f"[🎭 PLAYWRIGHT] Browser config: {browser_config}")
-    print(f"[🎭 PLAYWRIGHT] Max iterations: {max_iterations}")
+    print(f"\n[🎭 PLAYWRIGHT OpenAI] Starting automation test: '{test_prompt}'")
+    print(f"[🎭 PLAYWRIGHT OpenAI] Browser config: {browser_config}")
+    print(f"[🎭 PLAYWRIGHT OpenAI] Max iterations: {max_iterations}")
+    print(f"[DEBUG] Initial state message type: {type(initial_state['messages'][0])}")
     
     # Create and run agent
     agent = create_playwright_agent()
@@ -543,7 +561,7 @@ async def run_playwright_automation(test_prompt: str, max_iterations: int = 1, b
     try:
         final_state = await agent.ainvoke(initial_state)
         
-        print(f"\n[🎭 PLAYWRIGHT] Test completed:")
+        print(f"\n[🎭 PLAYWRIGHT OpenAI] Test completed:")
         print(f"  - Steps executed: {final_state['current_step']}")
         print(f"  - Is complete: {final_state.get('is_complete', False)}")
         print(f"  - Total messages: {len(final_state['messages'])}")
@@ -569,8 +587,13 @@ async def run_playwright_automation(test_prompt: str, max_iterations: int = 1, b
         }
         
     except Exception as e:
-        print(f"[❌ PLAYWRIGHT] Agent error: {e}")
+        print(f"[❌ PLAYWRIGHT OpenAI] Agent error: {e}")
         
+        # Check if it's a model_dump error
+        if 'model_dump' in str(e):
+            print("[❌ CRITICAL] This is a model_dump error with OpenAI!")
+            print(f"   Full error: {e}")
+            
         # Cleanup on error
         try:
             await pw_state.cleanup()
@@ -586,8 +609,8 @@ async def run_playwright_automation(test_prompt: str, max_iterations: int = 1, b
         }
 
 # Synchronous wrapper
-def run_test_with_visible_browser(prompt: str, max_iterations: int = 10, headless: bool = False, browser_type: str = "chromium") -> Dict[str, Any]:
-    """Synchronous wrapper for Playwright automation with visible browser
+def run_test_with_openai(prompt: str, max_iterations: int = 10, headless: bool = False, browser_type: str = "chromium") -> Dict[str, Any]:
+    """Synchronous wrapper for Playwright automation with OpenAI
     
     Args:
         prompt: Test description in natural language
@@ -603,59 +626,27 @@ def run_test_with_visible_browser(prompt: str, max_iterations: int = 10, headles
     return asyncio.run(run_playwright_automation(prompt, max_iterations, browser_config))
 
 if __name__ == "__main__":
-    # Example usage with different browsers
-    test_configs = [
-        {
-            "prompt": "Open https://example.com, take a screenshot, and get page content",
-            "browser": "chromium",
-            "description": "Test with Chromium browser"
-        },
-        {
-            "prompt": "Navigate to Google, search for 'Playwright automation', and take a screenshot of results",
-            "browser": "edge",
-            "description": "Test with Microsoft Edge browser"
-        },
-        {
-            "prompt": "Go to GitHub.com, get the page content, and take a screenshot",
-            "browser": "firefox",
-            "description": "Test with Firefox browser"
-        }
-    ]
-    
-    print("🎭 PLAYWRIGHT DIRECT AUTOMATION AGENT")
-    print("=====================================")
-    print("This agent supports multiple browsers: Chromium, Edge, Firefox, WebKit")
-    print("All browsers will be VISIBLE during automation")
+    # Test with OpenAI
+    print("🎭 PLAYWRIGHT AUTOMATION AGENT - OPENAI VERSION")
+    print("==============================================")
+    print("This version uses OpenAI ChatGPT and fixes model_dump errors")
     print()
     
-    for i, config in enumerate(test_configs, 1):
-        print(f"\n{'='*60}")
-        print(f"Test {i}: {config['description']}")
-        print(f"Browser: {config['browser'].upper()}")
-        print(f"Prompt: {config['prompt']}")
-        print('='*60)
+    test_prompt = "Navigate to https://httpbin.org, take a screenshot, get page content, and close browser"
+    
+    result = run_test_with_openai(
+        prompt=test_prompt,
+        max_iterations=3,
+        headless=False,
+        browser_type="chromium"
+    )
+    
+    print(f"\n📊 Final Results:")
+    print(f"  Status: {result['status']}")
+    print(f"  Steps executed: {result.get('steps_executed', 0)}")
+    if result.get('errors'):
+        print(f"  Errors: {result['errors']}")
+    else:
+        print("  ✅ No errors!")
         
-        # Create browser config for this test
-        browser_config = {
-            "headless": False,
-            "browser_type": config['browser']
-        }
-        
-        result = asyncio.run(run_playwright_automation(
-            config['prompt'], 
-            max_iterations=10, 
-            browser_config=browser_config
-        ))
-        
-        print(f"\n📊 Results:")
-        print(f"  Status: {result['status']}")
-        print(f"  Browser: {config['browser']}")
-        print(f"  Steps executed: {result.get('steps_executed', 0)}")
-        if result.get('errors'):
-            print(f"  Errors: {result['errors']}")
-        
-        print(f"\n⏸️  Pausing for 3 seconds before next test...")
-        import time
-        time.sleep(3)
-        
-    print(f"\n✅ All tests completed with multiple browsers!")
+    print(f"\n✅ OpenAI test completed!")
