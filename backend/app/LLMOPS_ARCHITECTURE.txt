@@ -1,0 +1,305 @@
+"""
+LLMOps Architecture Visualization
+================================
+
+COMPLETE DIRECTORY STRUCTURE
+============================
+
+backend/app/
+│
+├── llmops/                                 # Main LLMOps Package
+│   │
+│   ├── __init__.py                         # Package exports (all components)
+│   │
+│   ├── config/                             # Configuration Management
+│   │   ├── __init__.py                     # Exports: LLMOpsConfig, LLMConfig, get_config
+│   │   └── config.py                       # Classes:
+│   │                                       #   - LLMOpsConfig (main config dataclass)
+│   │                                       #   - LLMConfig (individual LLM settings)
+│   │                                       #   - get_config() (singleton)
+│   │
+│   ├── llm/                                # LLM Provider Implementations
+│   │   ├── __init__.py                     # Exports: LLMProvider, GroqProvider, OpenAIProvider, get_llm_provider
+│   │   └── providers.py                    # Classes:
+│   │                                       #   - LLMProvider (abstract base)
+│   │                                       #   - GroqProvider (Groq implementation)
+│   │                                       #   - OpenAIProvider (OpenAI/Custom gateway)
+│   │                                       #   - get_llm_provider() (factory)
+│   │
+│   ├── prompts/                            # Prompt Template Management
+│   │   ├── __init__.py                     # Exports: PromptManager, PromptTemplate, get_prompt_manager
+│   │   └── prompt_manager.py               # Classes:
+│   │                                       #   - PromptTemplate (dataclass)
+│   │                                       #   - PromptManager (template manager)
+│   │                                       #   - get_prompt_manager() (singleton)
+│   │                                       # Templates:
+│   │                                       #   - TEST_CASE_CONVERSION (system + user)
+│   │
+│   ├── models/                             # Data Models & Schemas
+│   │   ├── __init__.py                     # Exports: TestCase, TestCasePrompt, ExecutionResult, TestCaseStatus
+│   │   └── schemas.py                      # Classes:
+│   │                                       #   - TestCaseStatus (enum)
+│   │                                       #   - TestCase (test case data)
+│   │                                       #   - TestCasePrompt (generated prompt)
+│   │                                       #   - ExecutionResult (execution data)
+│   │
+│   ├── utils/                              # Utility Functions
+│   │   ├── __init__.py                     # Exports: ExcelReader, ExcelWriter
+│   │   └── excel_utils.py                  # Classes:
+│   │                                       #   - ExcelReader (read test cases)
+│   │                                       #   - ExcelWriter (write results)
+│   │
+│   ├── generators/                         # Main Orchestrators
+│   │   ├── __init__.py                     # Exports: TestCaseGenerator
+│   │   └── test_case_generator.py          # Classes:
+│   │                                       #   - TestCaseGenerator (main orchestrator)
+│   │                                       # Methods:
+│   │                                       #   - read_test_cases()
+│   │                                       #   - generate_playwright_prompt()
+│   │                                       #   - generate_batch()
+│   │                                       #   - process_excel()
+│   │
+│   └── tools/                              # Automation Tools (Reserved)
+│       └── __init__.py                     # Reserved for Playwright tools
+│
+├── llmops_example.py                       # Usage Example
+├── test_llmops_integration.py              # Integration Tests
+├── LLMOPS_README.md                        # User Documentation
+└── LLMOPS_IMPLEMENTATION_SUMMARY.md        # Implementation Summary
+
+
+DATA FLOW
+=========
+
+1. CONFIGURATION FLOW
+   Environment Variables → LLMOpsConfig → LLMConfig → LLM Provider
+
+2. TEST CASE READING FLOW
+   Excel File → ExcelReader → List[TestCase]
+
+3. PROMPT GENERATION FLOW
+   TestCase → PromptManager → (System, User) Prompts → LLM Provider → Generated Prompt
+
+4. COMPLETE WORKFLOW
+   Excel File → TestCaseGenerator → [
+       ExcelReader → TestCase →
+       PromptManager → Prompts →
+       LLM Provider → Generated Prompts
+   ] → List[TestCasePrompt]
+
+5. RESULT WRITING FLOW
+   List[ExecutionResult] → ExcelWriter → Excel File
+
+
+COMPONENT RELATIONSHIPS
+=======================
+
+TestCaseGenerator (Orchestrator)
+    ├── Uses: LLMOpsConfig
+    ├── Uses: LLMProvider (via get_llm_provider)
+    ├── Uses: PromptManager (via get_prompt_manager)
+    ├── Uses: ExcelReader
+    ├── Creates: TestCase
+    └── Returns: TestCasePrompt
+
+LLMProvider
+    ├── Uses: LLMOpsConfig
+    ├── Uses: LLMConfig
+    └── Implementations:
+        ├── GroqProvider (ChatGroq)
+        └── OpenAIProvider (ChatOpenAI)
+
+PromptManager
+    ├── Manages: PromptTemplate
+    └── Returns: (system_prompt, user_prompt)
+
+ExcelReader
+    ├── Reads: Excel files (pandas)
+    └── Returns: List[TestCase]
+
+ExcelWriter
+    ├── Writes: List[ExecutionResult]
+    └── Outputs: Excel files (openpyxl)
+
+
+API USAGE PATTERNS
+==================
+
+# Pattern 1: Simple Usage
+from llmops import TestCaseGenerator
+
+generator = TestCaseGenerator()
+prompts = generator.process_excel("test_cases.xlsx")
+
+# Pattern 2: Custom Provider
+from llmops import TestCaseGenerator
+
+generator = TestCaseGenerator(provider="groq")
+prompts = generator.process_excel("test_cases.xlsx")
+
+# Pattern 3: Manual Configuration
+from llmops import TestCaseGenerator, LLMOpsConfig
+
+config = LLMOpsConfig(use_groq=True, groq_api_key="key")
+generator = TestCaseGenerator(config=config)
+prompts = generator.generate_batch(test_cases)
+
+# Pattern 4: Component Access
+from llmops import ExcelReader, PromptManager, get_llm_provider
+
+reader = ExcelReader("test_cases.xlsx")
+test_cases = reader.get_test_cases()
+
+manager = PromptManager()
+system, user = manager.get_test_case_conversion_prompts(test_cases[0])
+
+provider = get_llm_provider("groq")
+response = provider.invoke(f"{system}\n\n{user}")
+
+
+DESIGN PRINCIPLES
+=================
+
+1. SEPARATION OF CONCERNS
+   - Each module has single responsibility
+   - Config separate from logic
+   - LLM providers abstracted
+   - Prompts managed centrally
+   - Data models isolated
+
+2. DEPENDENCY INJECTION
+   - Components accept dependencies
+   - Easy to test with mocks
+   - Flexible configuration
+
+3. FACTORY PATTERN
+   - get_llm_provider() creates providers
+   - get_config() creates config
+   - get_prompt_manager() creates manager
+
+4. SINGLETON PATTERN
+   - Single config instance
+   - Single prompt manager
+   - Lazy initialization
+
+5. INTERFACE SEGREGATION
+   - LLMProvider defines interface
+   - Implementations provide specifics
+   - Easy to add new providers
+
+
+EXTENSIBILITY
+=============
+
+Adding New LLM Provider:
+1. Create new class inheriting LLMProvider
+2. Implement get_llm() and invoke() methods
+3. Add to get_llm_provider() factory
+4. Update config to support new provider
+
+Adding New Prompt Template:
+1. Add to PromptManager.TEMPLATES
+2. Create getter method
+3. Export from prompts module
+
+Adding New Model:
+1. Create dataclass in schemas.py
+2. Add to_dict/from_dict methods
+3. Export from models module
+
+Adding New Utility:
+1. Create utility class/function
+2. Add to utils module
+3. Export from utils/__init__.py
+
+
+TESTING STRATEGY
+================
+
+Unit Tests (Per Module):
+- config/: Test configuration loading
+- llm/: Test provider initialization
+- prompts/: Test template rendering
+- models/: Test serialization
+- utils/: Test Excel read/write
+
+Integration Tests:
+- Full workflow: Excel → Generator → Prompts
+- Provider switching (Groq ↔ OpenAI)
+- Error handling
+- Edge cases
+
+Example Tests:
+- test_llmops_integration.py (comprehensive)
+- llmops_example.py (usage demonstration)
+
+
+MIGRATION GUIDE
+===============
+
+FROM: test_case_processor.py (monolithic)
+TO: LLMOps structured package
+
+Step 1: Install dependencies (already satisfied)
+Step 2: Set environment variables
+Step 3: Update imports:
+
+OLD CODE:
+    from test_case_processor import TestCaseProcessor
+    processor = TestCaseProcessor()
+    prompts = processor.process_excel("test.xlsx")
+
+NEW CODE:
+    from llmops import TestCaseGenerator
+    generator = TestCaseGenerator()
+    prompts = generator.process_excel("test.xlsx")
+
+Step 4: Update result handling:
+
+OLD CODE:
+    # Results as dictionaries
+
+NEW CODE:
+    from llmops import ExecutionResult, TestCaseStatus
+    result = ExecutionResult(
+        test_case=test_case,
+        status=TestCaseStatus.PASSED,
+        execution_time=2.5
+    )
+
+
+SUMMARY
+=======
+
+✅ 8 Directories created
+✅ 14 Python files implemented
+✅ 7 Core modules completed
+   - config (2 files)
+   - llm (2 files)
+   - prompts (2 files)
+   - models (2 files)
+   - utils (2 files)
+   - generators (2 files)
+   - tools (1 file)
+
+✅ 3 Documentation files
+   - LLMOPS_README.md
+   - LLMOPS_IMPLEMENTATION_SUMMARY.md
+   - LLMOPS_ARCHITECTURE.txt (this file)
+
+✅ 2 Example/Test files
+   - llmops_example.py
+   - test_llmops_integration.py
+
+✅ All integration tests passing
+✅ Complete documentation
+✅ Ready for production use
+
+Total Lines of Code: ~1500+ lines
+Total Documentation: ~1000+ lines
+Test Coverage: Integration tests + Examples
+Type Safety: Full type hints throughout
+Error Handling: Comprehensive try/catch blocks
+"""
+
+print(__doc__)

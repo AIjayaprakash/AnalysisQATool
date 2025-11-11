@@ -485,8 +485,8 @@ Begin the automation task now using the tools.""")
                     
                     if tool_func:
                         try:
-                            # Call the async tool function
-                            result = await tool_func.func(**args)
+                            # Call the tool using invoke method (LangChain standard)
+                            result = await tool_func.ainvoke(args)
                             tool_results.append(f"✅ {tool_name}: {result}")
                             print(f"[TOOL] {tool_name} -> {result}")
                         except Exception as e:
