@@ -1,6 +1,29 @@
 """Tools module - Playwright and other automation tools"""
 
-# This module is reserved for future Playwright tool definitions
-# and other automation utilities
+from .playwright_tools import (
+    playwright_navigate,
+    playwright_click,
+    playwright_type,
+    playwright_screenshot,
+    playwright_wait_for_selector,
+    playwright_wait_for_text,
+    playwright_get_page_content,
+    playwright_execute_javascript,
+    playwright_close_browser,
+    get_playwright_tools,
+    PLAYWRIGHT_TOOLS
+)
 
-__all__ = []
+__all__ = [
+    "playwright_navigate",
+    "playwright_click",
+    "playwright_type",
+    "playwright_screenshot",
+    "playwright_wait_for_selector",
+    "playwright_wait_for_text",
+    "playwright_get_page_content",
+    "playwright_execute_javascript",
+    "playwright_close_browser",
+    "get_playwright_tools",
+    "PLAYWRIGHT_TOOLS"
+]
