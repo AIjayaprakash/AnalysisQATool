@@ -191,6 +191,174 @@ async def playwright_close_browser() -> str:
         return f"❌ Failed to close browser: {str(e)}"
 
 
+@tool
+async def playwright_get_page_metadata(selector: str = None) -> str:
+    """Get comprehensive metadata of the current page or a specific element.
+    
+    Args:
+        selector: Optional CSS selector, XPath, or text to get element metadata.
+                 If not provided, returns page-level metadata only.
+    
+    Returns page metadata like URL, title, and if selector is provided,
+    returns element metadata like id, type, tag, text, name, class, href, input_type, etc.
+    """
+    try:
+        if not pw_state.is_initialized:
+            return "❌ Browser not initialized. Please navigate to a page first."
+        
+        # Collect page-level metadata
+        page_meta = {
+            "page_url": pw_state.page.url,
+            "page_title": await pw_state.page.title(),
+        }
+        
+        # If no selector provided, return only page metadata
+        if not selector:
+            metadata_str = "📄 Page Metadata:\n"
+            metadata_str += f"  • URL: {page_meta['page_url']}\n"
+            metadata_str += f"  • Title: {page_meta['page_title']}\n"
+            return metadata_str
+        
+        # Find element by selector
+        locator = None
+        if selector.startswith("text="):
+            locator = pw_state.page.locator(selector)
+        elif selector.startswith("//"):
+            locator = pw_state.page.locator(f"xpath={selector}")
+        else:
+            locator = pw_state.page.locator(selector)
+        
+        # Check if element exists
+        count = await locator.count()
+        if count == 0:
+            return f"❌ No element found with selector: {selector}"
+        
+        # Get first element
+        element = locator.first
+        
+        # Extract comprehensive element metadata using JavaScript
+        element_meta = await element.evaluate("""
+            (el) => {
+                return {
+                    tag: el.tagName.toLowerCase(),
+                    id: el.id || null,
+                    type: el.type || null,
+                    name: el.name || null,
+                    className: el.className || null,
+                    text: el.textContent?.trim().substring(0, 200) || null,
+                    value: el.value || null,
+                    href: el.href || null,
+                    src: el.src || null,
+                    alt: el.alt || null,
+                    title: el.title || null,
+                    placeholder: el.placeholder || null,
+                    ariaLabel: el.ariaLabel || null,
+                    role: el.role || null,
+                    disabled: el.disabled || null,
+                    checked: el.checked || null,
+                    selected: el.selected || null,
+                    readonly: el.readOnly || null,
+                    required: el.required || null,
+                    hidden: el.hidden || null,
+                    inputType: el.type || null,
+                    maxLength: el.maxLength || null,
+                    pattern: el.pattern || null,
+                    min: el.min || null,
+                    max: el.max || null,
+                    step: el.step || null,
+                    autocomplete: el.autocomplete || null,
+                    tabIndex: el.tabIndex || null,
+                    dataset: el.dataset ? JSON.stringify(el.dataset) : null,
+                    boundingBox: {
+                        x: el.getBoundingClientRect().x,
+                        y: el.getBoundingClientRect().y,
+                        width: el.getBoundingClientRect().width,
+                        height: el.getBoundingClientRect().height
+                    },
+                    isVisible: el.offsetParent !== null,
+                    innerHTML: el.innerHTML?.substring(0, 300) || null,
+                    outerHTML: el.outerHTML?.substring(0, 300) || null
+                };
+            }
+        """)
+        
+        # Format metadata for display
+        metadata_str = f"📄 Page Metadata:\n"
+        metadata_str += f"  • URL: {page_meta['page_url']}\n"
+        metadata_str += f"  • Title: {page_meta['page_title']}\n\n"
+        
+        metadata_str += f"🎯 Element Metadata (Found {count} element(s)):\n"
+        metadata_str += f"  • Selector: {selector}\n"
+        metadata_str += f"  • Tag: <{element_meta.get('tag')}>\n"
+        
+        # Add non-null attributes
+        if element_meta.get('id'):
+            metadata_str += f"  • ID: {element_meta['id']}\n"
+        if element_meta.get('type'):
+            metadata_str += f"  • Type: {element_meta['type']}\n"
+        if element_meta.get('name'):
+            metadata_str += f"  • Name: {element_meta['name']}\n"
+        if element_meta.get('className'):
+            metadata_str += f"  • Class: {element_meta['className']}\n"
+        if element_meta.get('text'):
+            metadata_str += f"  • Text: {element_meta['text']}\n"
+        if element_meta.get('value'):
+            metadata_str += f"  • Value: {element_meta['value']}\n"
+        if element_meta.get('href'):
+            metadata_str += f"  • Href: {element_meta['href']}\n"
+        if element_meta.get('src'):
+            metadata_str += f"  • Src: {element_meta['src']}\n"
+        if element_meta.get('alt'):
+            metadata_str += f"  • Alt: {element_meta['alt']}\n"
+        if element_meta.get('title'):
+            metadata_str += f"  • Title: {element_meta['title']}\n"
+        if element_meta.get('placeholder'):
+            metadata_str += f"  • Placeholder: {element_meta['placeholder']}\n"
+        if element_meta.get('ariaLabel'):
+            metadata_str += f"  • Aria-Label: {element_meta['ariaLabel']}\n"
+        if element_meta.get('role'):
+            metadata_str += f"  • Role: {element_meta['role']}\n"
+        if element_meta.get('inputType'):
+            metadata_str += f"  • Input Type: {element_meta['inputType']}\n"
+        if element_meta.get('maxLength') and element_meta['maxLength'] != -1:
+            metadata_str += f"  • Max Length: {element_meta['maxLength']}\n"
+        if element_meta.get('pattern'):
+            metadata_str += f"  • Pattern: {element_meta['pattern']}\n"
+        if element_meta.get('min'):
+            metadata_str += f"  • Min: {element_meta['min']}\n"
+        if element_meta.get('max'):
+            metadata_str += f"  • Max: {element_meta['max']}\n"
+        if element_meta.get('step'):
+            metadata_str += f"  • Step: {element_meta['step']}\n"
+        if element_meta.get('autocomplete'):
+            metadata_str += f"  • Autocomplete: {element_meta['autocomplete']}\n"
+        if element_meta.get('dataset'):
+            metadata_str += f"  • Data Attributes: {element_meta['dataset']}\n"
+        
+        # Boolean attributes
+        metadata_str += f"  • Disabled: {element_meta.get('disabled', False)}\n"
+        metadata_str += f"  • Checked: {element_meta.get('checked', False)}\n"
+        metadata_str += f"  • Selected: {element_meta.get('selected', False)}\n"
+        metadata_str += f"  • Readonly: {element_meta.get('readonly', False)}\n"
+        metadata_str += f"  • Required: {element_meta.get('required', False)}\n"
+        metadata_str += f"  • Hidden: {element_meta.get('hidden', False)}\n"
+        metadata_str += f"  • Visible: {element_meta.get('isVisible', False)}\n"
+        
+        # Position and size
+        bbox = element_meta.get('boundingBox', {})
+        metadata_str += f"  • Position: (x={bbox.get('x', 0):.1f}, y={bbox.get('y', 0):.1f})\n"
+        metadata_str += f"  • Size: {bbox.get('width', 0):.1f}x{bbox.get('height', 0):.1f}px\n"
+        metadata_str += f"  • Tab Index: {element_meta.get('tabIndex', 0)}\n"
+        
+        if element_meta.get('innerHTML'):
+            metadata_str += f"  • Inner HTML: {element_meta['innerHTML'][:100]}...\n"
+        
+        return metadata_str
+        
+    except Exception as e:
+        return f"❌ Failed to get metadata: {str(e)}"
+
+
 # Collect all Playwright tools
 PLAYWRIGHT_TOOLS = [
     playwright_navigate,
@@ -201,6 +369,7 @@ PLAYWRIGHT_TOOLS = [
     playwright_wait_for_text,
     playwright_get_page_content,
     playwright_execute_javascript,
+    playwright_get_page_metadata,
     playwright_close_browser,
 ]
 
