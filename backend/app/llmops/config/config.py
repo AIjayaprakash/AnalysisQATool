@@ -39,6 +39,7 @@ class LLMOpsConfig:
     # Default models
     groq_model: str = "llama-3.3-70b-versatile"
     openai_model: str = "gpt-4o"
+    browser_type="edge"
     
     # Custom gateway settings
     custom_gateway_url: Optional[str] = field(

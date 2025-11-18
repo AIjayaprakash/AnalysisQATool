@@ -1,7 +1,7 @@
 """Playwright automation tools for LLMOps"""
 
 import os
-from typing import List
+from typing import List, Optional
 from langchain_core.tools import tool
 from ..utils.playwright_state import get_playwright_state
 
@@ -192,7 +192,7 @@ async def playwright_close_browser() -> str:
 
 
 @tool
-async def playwright_get_page_metadata(selector: str = None) -> str:
+async def playwright_get_page_metadata(selector: Optional[str] = None) -> str:
     """Get comprehensive metadata of the current page or a specific element.
     
     Args:

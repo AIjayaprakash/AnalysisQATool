@@ -1,17 +1,18 @@
-"""Playwright automation agent using LangGraph with custom OpenAI"""
+"""Playwright automation agent using LangGraph with OpenAI/Groq"""
 
 import os
 import re
 import json
 import asyncio
-from typing import Dict, List, Any, Annotated, TypedDict
+from typing import Dict, List, Any, Annotated, TypedDict, Optional
 from datetime import datetime
 
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 
-from ..llm import CustomOpenAILLM
+from ..llm import get_llm_provider
+from ..config import LLMOpsConfig
 from ..tools import get_playwright_tools
 from ..utils import get_playwright_state
 from ..prompts import get_prompt_manager
@@ -26,32 +27,44 @@ class PlaywrightAgentState(TypedDict):
 
 
 class PlaywrightAgent:
-    """Playwright automation agent with LangGraph and Custom OpenAI"""
+    """Playwright automation agent with LangGraph using OpenAI or Groq"""
     
     def __init__(
         self,
+        provider: str = None,
         api_key: str = None,
-        model: str = "gpt-4o",
-        gateway_url: str = None
+        model: str = None,
+        config: LLMOpsConfig = None
     ):
         """
         Initialize Playwright Agent
         
         Args:
-            api_key: Custom OpenAI API key
-            model: Model name (default: gpt-4o)
-            gateway_url: Custom gateway URL
+            provider: "openai" or "groq" (auto-detect from config/env if None)
+            api_key: API key for the provider (auto-detect from config/env if None)
+            model: Model name (uses provider defaults if None)
+            config: LLMOpsConfig instance (creates default if None)
         """
-        # Get API key from environment if not provided
-        if api_key is None:
-            api_key = os.getenv("CUSTOM_OPENAI_KEY", "placeholder-key")
+        # Use provided config or create default
+        if config is None:
+            config = LLMOpsConfig()
         
-        # Initialize Custom OpenAI LLM
-        self.llm = CustomOpenAILLM(
+        self.config = config
+        
+        # Get LLM provider
+        llm_provider = get_llm_provider(
+            provider_type=provider,
+            config=config,
             api_key=api_key,
-            model=model,
-            gateway_url=gateway_url or f"https://gateway.ai-npe.humana.com/openai/deployments/{model}"
+            model_name=model
         )
+        
+        # Get LLM instance
+        self.llm = llm_provider.get_llm()
+        
+        print(f"[INFO] Using {llm_provider.__class__.__name__} with model: {llm_provider.model_name}")
+        
+        print(f"[INFO] Using {llm_provider.__class__.__name__} with model: {llm_provider.model_name}")
         
         # Get Playwright tools
         self.tools = get_playwright_tools()
@@ -102,13 +115,16 @@ ARGS: {"url": "https://example.com"}
 USE_TOOL: playwright_get_page_metadata
 ARGS: {"selector": null}
 
+USE_TOOL: playwright_get_page_metadata
+ARGS: {"selector": "button#submit"}
+
 USE_TOOL: playwright_screenshot
 ARGS: {"filename": "step1.png"}
 
 METADATA EXTRACTION REQUIREMENT:
 IMPORTANT: After navigating to each page and before interacting with elements:
-1. Use playwright_get_page_metadata with selector=null to get page info
-2. Use playwright_get_page_metadata with specific selectors for key elements you interact with
+1. Use playwright_get_page_metadata with ARGS: {"selector": null} to get page info (note: use null, not "null")
+2. Use playwright_get_page_metadata with ARGS: {"selector": "css-selector"} for specific elements
 3. Extract metadata for: links, buttons, inputs, forms - anything you click or type into
 
 EXECUTION RULES:
@@ -125,7 +141,7 @@ Begin the automation task now using the tools."""
             system_message = SystemMessage(content=system_prompt)
             messages = [system_message] + state["messages"]
             
-            # Use our custom OpenAI LLM
+            # Use OpenAI or Groq LLM
             response = self.llm.invoke(messages)
             return {"messages": [response], "current_step": state["current_step"] + 1}
         

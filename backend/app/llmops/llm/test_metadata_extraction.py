@@ -7,6 +7,12 @@ structured page and element metadata in the specified JSON format.
 
 import requests
 import json
+import sys
+import os
+
+# Add parent directory to path to import from llmops_api
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+from llmops_api import parse_metadata_from_output
 
 BASE_URL = "http://localhost:8000"
 
@@ -27,8 +33,6 @@ def test_metadata_extraction():
         "steps": """
             1. Navigate to https://example.com
             2. Extract page metadata (URL and title)
-            3. Extract metadata for all key elements (links, buttons, etc.)
-            4. Take screenshot for documentation
         """,
         "expected_result": "Complete metadata extracted in structured JSON format",
         "priority": "High"
@@ -58,10 +62,80 @@ def test_metadata_extraction():
         if result.get('screenshots'):
             print(f"Screenshots: {', '.join(result['screenshots'])}")
         
-        # Display extracted metadata
+        # Parse metadata from agent output using the parse function
+        print("\n" + "=" * 80)
+        print("🔍 Parsing Metadata from Agent Output")
+        print("=" * 80)
+        
+        # Get the final response which contains tool execution results
+        final_response = result.get('final_response', '')
+        
+        if final_response:
+            print(f"Parsing {len(final_response)} characters of agent output...")
+            
+            # Use the parse_metadata_from_output function
+            parsed_pages = parse_metadata_from_output(final_response)
+            
+            if parsed_pages:
+                print(f"✅ Parsed {len(parsed_pages)} page(s) with metadata")
+                
+                # Convert to clean JSON format
+                clean_metadata = {
+                    "pages": [
+                        {
+                            "id": page.id,
+                            "label": page.label,
+                            "x": page.x,
+                            "y": page.y,
+                            "metadata": {
+                                "url": page.metadata.url,
+                                "title": page.metadata.title,
+                                "key_elements": [
+                                    {
+                                        "id": elem.id,
+                                        "type": elem.type,
+                                        "tag": elem.tag,
+                                        "text": elem.text,
+                                        "element_id": elem.element_id,
+                                        "name": elem.name,
+                                        "class": elem.class_name,
+                                        "href": elem.href,
+                                        "input_type": elem.input_type,
+                                        "depends_on": elem.depends_on
+                                    }
+                                    for elem in page.metadata.key_elements
+                                ]
+                            }
+                        }
+                        for page in parsed_pages
+                    ]
+                }
+                
+                # Save clean metadata to file
+                clean_output_file = "playwright_clean_metadata.json"
+                with open(clean_output_file, 'w', encoding='utf-8') as f:
+                    json.dump(clean_metadata, f, indent=2, ensure_ascii=False)
+                
+                print(f"💾 Clean metadata saved to: {clean_output_file}")
+                
+                # Display the clean metadata
+                print("\n" + "=" * 80)
+                print("📋 Clean Metadata Output (Formatted)")
+                print("=" * 80)
+                print(json.dumps(clean_metadata, indent=2))
+                
+            else:
+                print("⚠️  No metadata found in agent output")
+                print("Checking for metadata markers...")
+                print(f"  - Found '📄 Page Metadata': {'📄 Page Metadata' in final_response}")
+                print(f"  - Found '🎯 Element Metadata': {'🎯 Element Metadata' in final_response}")
+        else:
+            print("⚠️  No final response available to parse")
+        
+        # Display extracted metadata from result (if API already parsed it)
         if result.get('pages'):
             print("\n" + "=" * 80)
-            print("🗂️  Extracted Metadata")
+            print("🗂️  Extracted Metadata (from API response)")
             print("=" * 80)
             
             for page in result['pages']:
@@ -92,19 +166,12 @@ def test_metadata_extraction():
         
         print(f"\n💾 Full response saved to: {output_file}")
         
-        # Display formatted JSON structure
-        print("\n" + "=" * 80)
-        print("📋 Sample Page Metadata Structure")
-        print("=" * 80)
-        
-        if result.get('pages'):
-            # Show first page in pretty format
-            sample_page = result['pages'][0]
-            print(json.dumps(sample_page, indent=2))
-        
         print("\n" + "=" * 80)
         print("✅ Test Completed Successfully!")
         print("=" * 80)
+        print("\n📄 Files created:")
+        print("  - playwright_metadata_output.json (full response)")
+        print("  - playwright_clean_metadata.json (clean metadata only)")
         
         return result
         
@@ -134,8 +201,6 @@ def test_with_custom_prompt():
         "steps": """
             1. Navigate to https://example.com
             2. Extract page metadata
-            3. Find and extract metadata for all form inputs
-            4. Document button elements
         """
     }
     
