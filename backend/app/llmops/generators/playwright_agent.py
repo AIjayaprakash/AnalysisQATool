@@ -87,6 +87,7 @@ Available Playwright tools:
 - playwright_wait_for_text(text, timeout): Wait for text to appear
 - playwright_get_page_content(): Get page structure and content
 - playwright_execute_javascript(script): Run JavaScript
+- playwright_get_page_metadata(selector): Extract metadata for page or specific element
 - playwright_close_browser(): Close browser when done
 
 TOOL USAGE FORMAT:
@@ -98,15 +99,26 @@ Example:
 USE_TOOL: playwright_navigate  
 ARGS: {"url": "https://example.com"}
 
+USE_TOOL: playwright_get_page_metadata
+ARGS: {"selector": null}
+
 USE_TOOL: playwright_screenshot
 ARGS: {"filename": "step1.png"}
 
+METADATA EXTRACTION REQUIREMENT:
+IMPORTANT: After navigating to each page and before interacting with elements:
+1. Use playwright_get_page_metadata with selector=null to get page info
+2. Use playwright_get_page_metadata with specific selectors for key elements you interact with
+3. Extract metadata for: links, buttons, inputs, forms - anything you click or type into
+
 EXECUTION RULES:
 1. ALWAYS start with USE_TOOL: playwright_navigate
-2. Use USE_TOOL format for ALL actions
-3. Take screenshots to document progress
-4. ALWAYS end with USE_TOOL: playwright_close_browser
-5. Work step by step and explain your actions
+2. After navigation, IMMEDIATELY extract page metadata
+3. Before interacting with an element, extract its metadata first
+4. Use USE_TOOL format for ALL actions
+5. Take screenshots to document progress
+6. ALWAYS end with USE_TOOL: playwright_close_browser
+7. Work step by step and explain your actions
 
 Begin the automation task now using the tools."""
             

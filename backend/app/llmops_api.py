@@ -67,6 +67,33 @@ class PlaywrightExecutionRequest(BaseModel):
     headless: bool = Field(default=False, description="Run browser in headless mode")
     max_iterations: int = Field(default=10, description="Maximum automation iterations")
     
+class ElementMetadata(BaseModel):
+    """Metadata for a single element"""
+    id: str = Field(..., description="Element identifier")
+    type: str = Field(..., description="Element type (link, button, input, etc.)")
+    tag: str = Field(..., description="HTML tag name")
+    text: Optional[str] = Field(None, description="Element text content")
+    element_id: Optional[str] = Field(None, description="HTML id attribute", alias="id_attr")
+    name: Optional[str] = Field(None, description="Element name attribute")
+    class_name: Optional[str] = Field(None, description="Element class attribute", alias="class")
+    href: Optional[str] = Field(None, description="Link href attribute")
+    input_type: Optional[str] = Field(None, description="Input type attribute")
+    depends_on: List[str] = Field(default_factory=list, description="Dependencies on other elements")
+    
+class PageMetadata(BaseModel):
+    """Metadata for a page"""
+    url: str = Field(..., description="Page URL")
+    title: str = Field(..., description="Page title")
+    key_elements: List[ElementMetadata] = Field(default_factory=list, description="Key elements on the page")
+
+class PageNode(BaseModel):
+    """Page node with metadata"""
+    id: str = Field(..., description="Page node identifier")
+    label: str = Field(..., description="Page label with title and domain")
+    x: int = Field(default=200, description="X coordinate for visualization")
+    y: int = Field(default=100, description="Y coordinate for visualization")
+    metadata: PageMetadata = Field(..., description="Page metadata with elements")
+
 class PlaywrightExecutionResponse(BaseModel):
     """Response model for Playwright automation execution"""
     test_id: str
@@ -77,6 +104,7 @@ class PlaywrightExecutionResponse(BaseModel):
     screenshots: List[str] = []
     error_message: Optional[str] = None
     executed_at: str
+    pages: List[PageNode] = Field(default_factory=list, description="Extracted page metadata")
 
 class BatchProcessRequest(BaseModel):
     test_cases: List[TestCaseRequest]
@@ -413,13 +441,114 @@ async def execute_playwright_automation(request: PlaywrightExecutionRequest):
         request: Contains test_id, generated_prompt, and browser settings
     
     Returns:
-        Execution results with status, steps, and screenshots
+        Execution results with status, steps, screenshots, and extracted metadata
     
     Example workflow:
         1. POST /generate-prompt -> Get generated_prompt
         2. POST /execute-playwright -> Execute automation with the prompt
     """
     import time
+    import re
+    
+    def parse_metadata_from_output(output: str) -> List[PageNode]:
+        """
+        Parse metadata from agent output
+        
+        Looks for playwright_get_page_metadata tool outputs and structures them
+        into PageNode format with ElementMetadata
+        """
+        pages = []
+        page_counter = 1
+        
+        # Extract all metadata blocks from the output
+        # Looking for patterns like:
+        # "📄 Page Metadata:\n  • URL: https://example.com\n  • Title: Example Domain"
+        # "🎯 Element Metadata (Found 1 element(s)):\n  • Selector: a\n  • Tag: <a>"
+        
+        # Find page metadata blocks
+        page_pattern = r'📄 Page Metadata:\s*\n\s*•\s*URL:\s*([^\n]+)\s*\n\s*•\s*Title:\s*([^\n]+)'
+        page_matches = re.finditer(page_pattern, output, re.MULTILINE)
+        
+        for page_match in page_matches:
+            url = page_match.group(1).strip()
+            title = page_match.group(2).strip()
+            
+            # Extract domain for label
+            domain_match = re.search(r'https?://([^/]+)', url)
+            domain = domain_match.group(1) if domain_match else url
+            label = f"{title} ({domain})"
+            
+            # Find element metadata following this page metadata
+            elements = []
+            element_counter = 1
+            
+            # Look for element blocks after this page block
+            element_pattern = r'🎯 Element Metadata \(Found \d+ element\(s\)\):(.*?)(?=📄 Page Metadata:|🎯 Element Metadata|$)'
+            element_search_start = page_match.end()
+            remaining_output = output[element_search_start:element_search_start + 5000]  # Look ahead 5000 chars
+            
+            element_matches = re.finditer(element_pattern, remaining_output, re.DOTALL)
+            
+            for elem_match in element_matches:
+                elem_block = elem_match.group(1)
+                
+                # Extract element attributes
+                tag_match = re.search(r'•\s*Tag:\s*<([^>]+)>', elem_block)
+                type_match = re.search(r'•\s*Type:\s*([^\n]+)', elem_block)
+                text_match = re.search(r'•\s*Text:\s*([^\n]+)', elem_block)
+                id_match = re.search(r'•\s*ID:\s*([^\n]+)', elem_block)
+                name_match = re.search(r'•\s*Name:\s*([^\n]+)', elem_block)
+                class_match = re.search(r'•\s*Class:\s*([^\n]+)', elem_block)
+                href_match = re.search(r'•\s*Href:\s*([^\n]+)', elem_block)
+                input_type_match = re.search(r'•\s*Input Type:\s*([^\n]+)', elem_block)
+                
+                tag = tag_match.group(1) if tag_match else "unknown"
+                element_type = type_match.group(1) if type_match else tag
+                
+                # Determine element type from tag if not specified
+                if element_type == tag:
+                    if tag == "a":
+                        element_type = "link"
+                    elif tag == "button":
+                        element_type = "button"
+                    elif tag == "input":
+                        element_type = "input"
+                    elif tag == "form":
+                        element_type = "form"
+                
+                element = ElementMetadata(
+                    id=f"element_{element_counter}",
+                    type=element_type,
+                    tag=tag,
+                    text=text_match.group(1).strip() if text_match else None,
+                    element_id=id_match.group(1).strip() if id_match else None,
+                    name=name_match.group(1).strip() if name_match else None,
+                    class_name=class_match.group(1).strip() if class_match else None,
+                    href=href_match.group(1).strip() if href_match else None,
+                    input_type=input_type_match.group(1).strip() if input_type_match else None,
+                    depends_on=[]
+                )
+                
+                elements.append(element)
+                element_counter += 1
+            
+            # Create page node
+            page_node = PageNode(
+                id=f"page_{page_counter}",
+                label=label,
+                x=200 + (page_counter - 1) * 300,  # Offset pages horizontally
+                y=100,
+                metadata=PageMetadata(
+                    url=url,
+                    title=title,
+                    key_elements=elements
+                )
+            )
+            
+            pages.append(page_node)
+            page_counter += 1
+        
+        return pages
     
     try:
         start_time = time.time()
@@ -463,9 +592,11 @@ async def execute_playwright_automation(request: PlaywrightExecutionRequest):
         
         # Look for screenshot mentions in output
         screenshots = []
-        import re
         screenshot_matches = re.findall(r'screenshot.*?([a-zA-Z0-9_-]+\.png)', agent_output, re.IGNORECASE)
         screenshots.extend(screenshot_matches)
+        
+        # Parse metadata from agent output
+        pages = parse_metadata_from_output(agent_output)
         
         return PlaywrightExecutionResponse(
             test_id=request.test_id,
@@ -475,7 +606,8 @@ async def execute_playwright_automation(request: PlaywrightExecutionRequest):
             agent_output=agent_output,
             screenshots=screenshots,
             error_message=None if is_success else "Automation encountered issues. Check agent_output for details.",
-            executed_at=datetime.now().isoformat()
+            executed_at=datetime.now().isoformat(),
+            pages=pages
         )
         
     except Exception as e:
@@ -488,7 +620,8 @@ async def execute_playwright_automation(request: PlaywrightExecutionRequest):
             agent_output="",
             screenshots=[],
             error_message=str(e),
-            executed_at=datetime.now().isoformat()
+            executed_at=datetime.now().isoformat(),
+            pages=[]
         )
 
 
