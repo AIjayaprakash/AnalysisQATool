@@ -21,7 +21,8 @@ from llmops import (
     TestCasePrompt,
     ExecutionResult,
     TestCaseStatus,
-    get_config
+    get_config,
+    PlaywrightAgent
 )
 
 # Initialize FastAPI app
@@ -57,6 +58,25 @@ class ConfigResponse(BaseModel):
     model: str
     temperature: float
     use_groq: bool
+
+class PlaywrightExecutionRequest(BaseModel):
+    """Request model for Playwright automation execution"""
+    test_id: str = Field(..., description="Test case ID from generated prompt")
+    generated_prompt: str = Field(..., description="Generated Playwright prompt from /generate-prompt endpoint")
+    browser_type: str = Field(default="chromium", description="Browser type: chromium, firefox, or webkit")
+    headless: bool = Field(default=False, description="Run browser in headless mode")
+    max_iterations: int = Field(default=10, description="Maximum automation iterations")
+    
+class PlaywrightExecutionResponse(BaseModel):
+    """Response model for Playwright automation execution"""
+    test_id: str
+    status: str  # "success", "failed", "error"
+    execution_time: float
+    steps_executed: int
+    agent_output: str
+    screenshots: List[str] = []
+    error_message: Optional[str] = None
+    executed_at: str
 
 class BatchProcessRequest(BaseModel):
     test_cases: List[TestCaseRequest]
@@ -379,6 +399,146 @@ async def change_provider(provider: str):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error changing provider: {str(e)}")
+
+
+@app.post("/execute-playwright", response_model=PlaywrightExecutionResponse, tags=["Playwright Automation"])
+async def execute_playwright_automation(request: PlaywrightExecutionRequest):
+    """
+    Execute Playwright automation based on generated prompt
+    
+    This endpoint takes the output from /generate-prompt and executes
+    the automated test using Playwright agent.
+    
+    Args:
+        request: Contains test_id, generated_prompt, and browser settings
+    
+    Returns:
+        Execution results with status, steps, and screenshots
+    
+    Example workflow:
+        1. POST /generate-prompt -> Get generated_prompt
+        2. POST /execute-playwright -> Execute automation with the prompt
+    """
+    import time
+    
+    try:
+        start_time = time.time()
+        
+        # Initialize Playwright Agent
+        # Get custom OpenAI config from environment
+        api_key = os.getenv("CUSTOM_OPENAI_KEY")
+        gateway_url = os.getenv("CUSTOM_OPENAI_GATEWAY_URL")
+        model = os.getenv("CUSTOM_OPENAI_MODEL", "gpt-4o")
+        
+        if not api_key:
+            raise HTTPException(
+                status_code=400, 
+                detail="CUSTOM_OPENAI_KEY environment variable not set. Required for Playwright agent."
+            )
+        
+        agent = PlaywrightAgent(
+            api_key=api_key,
+            model=model,
+            gateway_url=gateway_url
+        )
+        
+        # Execute the automation with the generated prompt
+        result = await agent.run(
+            task=request.generated_prompt,
+            max_iterations=request.max_iterations
+        )
+        
+        execution_time = time.time() - start_time
+        
+        # Parse the result to extract useful information
+        agent_output = str(result) if result else "No output"
+        
+        # Count steps executed (messages in the conversation)
+        steps_executed = len(result.get("messages", [])) if isinstance(result, dict) else 0
+        
+        # Check if automation completed successfully
+        # Consider it successful if browser navigation occurred and no errors
+        is_success = "error" not in agent_output.lower() and "failed" not in agent_output.lower()
+        status = "success" if is_success else "failed"
+        
+        # Look for screenshot mentions in output
+        screenshots = []
+        import re
+        screenshot_matches = re.findall(r'screenshot.*?([a-zA-Z0-9_-]+\.png)', agent_output, re.IGNORECASE)
+        screenshots.extend(screenshot_matches)
+        
+        return PlaywrightExecutionResponse(
+            test_id=request.test_id,
+            status=status,
+            execution_time=round(execution_time, 2),
+            steps_executed=steps_executed,
+            agent_output=agent_output,
+            screenshots=screenshots,
+            error_message=None if is_success else "Automation encountered issues. Check agent_output for details.",
+            executed_at=datetime.now().isoformat()
+        )
+        
+    except Exception as e:
+        execution_time = time.time() - start_time
+        return PlaywrightExecutionResponse(
+            test_id=request.test_id,
+            status="error",
+            execution_time=round(execution_time, 2),
+            steps_executed=0,
+            agent_output="",
+            screenshots=[],
+            error_message=str(e),
+            executed_at=datetime.now().isoformat()
+        )
+
+
+@app.post("/execute-playwright-from-testcase", response_model=PlaywrightExecutionResponse, tags=["Playwright Automation"])
+async def execute_playwright_from_testcase(request: TestCaseRequest):
+    """
+    Combined endpoint: Generate prompt AND execute Playwright automation
+    
+    This is a convenience endpoint that combines /generate-prompt and /execute-playwright
+    into a single call for end-to-end automation.
+    
+    Args:
+        request: Test case details (same as /generate-prompt)
+    
+    Returns:
+        Execution results with generated prompt and automation status
+    """
+    try:
+        # Step 1: Generate prompt
+        test_case = TestCase(
+            test_id=request.test_id,
+            module=request.module,
+            functionality=request.functionality,
+            description=request.description,
+            steps=request.steps,
+            expected_result=request.expected_result,
+            priority=request.priority
+        )
+        
+        prompt_result = generator.generate_playwright_prompt(test_case)
+        generated_prompt = prompt_result.generated_prompt
+        
+        if not generated_prompt:
+            raise HTTPException(status_code=500, detail="Failed to generate prompt")
+        
+        # Step 2: Execute automation with generated prompt
+        exec_request = PlaywrightExecutionRequest(
+            test_id=request.test_id,
+            generated_prompt=generated_prompt,
+            browser_type="chromium",
+            headless=False,
+            max_iterations=10
+        )
+        
+        return await execute_playwright_automation(exec_request)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error in combined execution: {str(e)}")
 
 
 if __name__ == "__main__":
