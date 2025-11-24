@@ -17,6 +17,9 @@ from ..tools import get_playwright_tools
 from ..utils import get_playwright_state
 from ..prompts import get_prompt_manager
 from ..common.exceptions import PlaywrightException, StateException, LLMException
+from ..common.logger import log_info, log_error, log_debug
+from .playwright_prompts import PlaywrightAgentPrompts
+from .playwright_graph_builder import PlaywrightAgentGraphBuilder
 
 
 class PlaywrightAgentState(TypedDict):
@@ -63,9 +66,11 @@ class PlaywrightAgent:
         # Get LLM instance
         self.llm = llm_provider.get_llm()
         
-        print(f"[INFO] Using {llm_provider.__class__.__name__} with model: {llm_provider.model_name}")
-        
-        print(f"[INFO] Using {llm_provider.__class__.__name__} with model: {llm_provider.model_name}")
+        log_info(
+            f"Using {llm_provider.__class__.__name__} with model: {llm_provider.model_name}",
+            node="playwright_agent.init",
+            extra={"provider": llm_provider.__class__.__name__, "model": llm_provider.model_name}
+        )
         
         # Get Playwright tools
         self.tools = get_playwright_tools()
@@ -79,184 +84,27 @@ class PlaywrightAgent:
         # Build agent
         self.agent = self._build_agent()
         
-        print(f"[INFO] Playwright Agent initialized with {len(self.tools)} tools")
+        log_info(
+            f"Playwright Agent initialized with {len(self.tools)} tools",
+            node="playwright_agent.init",
+            extra={"tool_count": len(self.tools)}
+        )
     
     def _build_agent(self):
-        """Build the LangGraph agent"""
+        """
+        Build the LangGraph agent using graph builder
         
-        def call_model_with_tools(state: PlaywrightAgentState):
-            """Call the model and request tool usage"""
-            
-            # Get system prompt for Playwright automation
-            system_prompt = """You are an expert QA automation engineer using Playwright for web automation.
-
-CRITICAL: The browser will be VISIBLE during automation. You MUST use the available tools to complete the task.
-
-Available Playwright tools:
-- playwright_navigate(url): Navigate to a website (opens visible browser)
-- playwright_click(selector, element_description): Click elements on the page
-- playwright_type(selector, text, element_description): Type text into input fields  
-- playwright_screenshot(filename): Take screenshots for documentation
-- playwright_wait_for_selector(selector, timeout): Wait for elements to appear
-- playwright_wait_for_text(text, timeout): Wait for text to appear
-- playwright_get_page_content(): Get page structure and content
-- playwright_execute_javascript(script): Run JavaScript
-- playwright_get_page_metadata(selector): Extract metadata for page or specific element
-- playwright_close_browser(): Close browser when done
-
-TOOL USAGE FORMAT:
-To use a tool, respond with:
-USE_TOOL: tool_name
-ARGS: {"arg1": "value1", "arg2": "value2"}
-
-Example:
-USE_TOOL: playwright_navigate  
-ARGS: {"url": "https://example.com"}
-
-USE_TOOL: playwright_get_page_metadata
-ARGS: {"selector": null}
-
-USE_TOOL: playwright_get_page_metadata
-ARGS: {"selector": "button#submit"}
-
-USE_TOOL: playwright_screenshot
-ARGS: {"filename": "step1.png"}
-
-METADATA EXTRACTION REQUIREMENT:
-IMPORTANT: After navigating to each page and before interacting with elements:
-1. Use playwright_get_page_metadata with ARGS: {"selector": null} to get page info (note: use null, not "null")
-2. Use playwright_get_page_metadata with ARGS: {"selector": "css-selector"} for specific elements
-3. Extract metadata for: links, buttons, inputs, forms - anything you click or type into
-
-EXECUTION RULES:
-1. ALWAYS start with USE_TOOL: playwright_navigate
-2. After navigation, IMMEDIATELY extract page metadata
-3. Before interacting with an element, extract its metadata first
-4. Use USE_TOOL format for ALL actions
-5. Take screenshots to document progress
-6. ALWAYS end with USE_TOOL: playwright_close_browser
-7. Work step by step and explain your actions
-
-Begin the automation task now using the tools."""
-            
-            system_message = SystemMessage(content=system_prompt)
-            messages = [system_message] + state["messages"]
-            
-            # Use OpenAI or Groq LLM
-            response = self.llm.invoke(messages)
-            return {"messages": [response], "current_step": state["current_step"] + 1}
-        
-        async def execute_tool_calls(state: PlaywrightAgentState):
-            """Parse and execute tool calls from model response"""
-            last_message = state["messages"][-1]
-            content = str(last_message.content) if hasattr(last_message, 'content') else str(last_message)
-            
-            # Parse USE_TOOL format
-            tool_pattern = r'USE_TOOL:\s*([^\n]+)\s*\nARGS:\s*(\{[^}]*\})'
-            tool_matches = re.findall(tool_pattern, content, re.MULTILINE | re.DOTALL)
-            
-            if tool_matches:
-                tool_results = []
-                
-                for tool_name, args_str in tool_matches:
-                    tool_name = tool_name.strip()
-                    try:
-                        args = json.loads(args_str) if args_str.strip() else {}
-                        
-                        # Find and execute the tool
-                        tool_func = None
-                        for tool in self.tools:
-                            if tool.name == tool_name:
-                                tool_func = tool
-                                break
-                        
-                        if tool_func:
-                            try:
-                                # Call the tool using ainvoke method (LangChain standard)
-                                result = await tool_func.ainvoke(args)
-                                tool_results.append(f"✅ {tool_name}: {result}")
-                                print(f"[TOOL] {tool_name} -> {result}")
-                            except PlaywrightException as e:
-                                error_msg = f"❌ {tool_name} playwright error: {str(e)}"
-                                tool_results.append(error_msg)
-                                print(f"[ERROR] {error_msg}")
-                            except Exception as e:
-                                error_msg = f"❌ {tool_name} error: {str(e)}"
-                                tool_results.append(error_msg)
-                                print(f"[ERROR] {error_msg}")
-                        else:
-                            error_msg = f"❌ Tool '{tool_name}' not found"
-                            tool_results.append(error_msg)
-                            print(f"[ERROR] {error_msg}")
-                            
-                    except json.JSONDecodeError as e:
-                        error_msg = f"❌ Failed to parse args for {tool_name}: {args_str}"
-                        tool_results.append(error_msg)
-                        print(f"[ERROR] {error_msg}")
-                
-                # Return tool results
-                result_content = "Tool execution results:\n" + "\n".join(tool_results)
-                return {"messages": [AIMessage(content=result_content)]}
-            
-            # No tools found, mark as complete
-            return {"messages": [], "is_complete": True}
-        
-        def should_continue(state: PlaywrightAgentState) -> str:
-            """Decide whether to continue or end"""
-            
-            # Check completion conditions
-            if state.get("is_complete", False):
-                return END
-                
-            if state["current_step"] >= state["max_iterations"]:
-                return END
-            
-            last_message = state["messages"][-1]
-            content = str(last_message.content) if hasattr(last_message, 'content') else str(last_message)
-            
-            # Check for tool calls
-            if "USE_TOOL:" in content:
-                return "execute_tools"
-            
-            # Check for completion indicators
-            if any(phrase in content.lower() for phrase in ["browser closed", "task complete", "automation complete"]):
-                return END
-            
-            # Continue with model
-            return "call_model"
-        
-        # Build the StateGraph
-        workflow = StateGraph(PlaywrightAgentState)
-        
-        # Add nodes
-        workflow.add_node("call_model", call_model_with_tools)
-        workflow.add_node("execute_tools", execute_tool_calls)
-        
-        # Set entry point
-        workflow.set_entry_point("call_model")
-        
-        # Add conditional edges
-        workflow.add_conditional_edges(
-            "call_model",
-            should_continue,
-            {
-                "execute_tools": "execute_tools",
-                "call_model": "call_model",
-                END: END
-            }
+        Returns:
+            Compiled LangGraph workflow
+        """
+        # Use graph builder to construct the agent workflow
+        graph_builder = PlaywrightAgentGraphBuilder(
+            llm=self.llm,
+            tools=self.tools,
+            pw_state=self.pw_state
         )
         
-        workflow.add_conditional_edges(
-            "execute_tools",
-            should_continue,
-            {
-                "call_model": "call_model",
-                END: END
-            }
-        )
-        
-        # Compile the graph
-        return workflow.compile()
+        return graph_builder.build_graph(PlaywrightAgentState)
     
     async def run(
         self,
@@ -282,9 +130,15 @@ Begin the automation task now using the tools."""
                 "browser_type": "chromium"
             }
         
-        print(f"\n[🎭 PLAYWRIGHT] Starting automation test: '{test_prompt}'")
-        print(f"[🎭 PLAYWRIGHT] Browser config: {browser_config}")
-        print(f"[🎭 PLAYWRIGHT] Max iterations: {max_iterations}")
+        log_info(
+            f"Starting Playwright automation test",
+            node="playwright_agent.run",
+            extra={
+                "test_prompt": test_prompt[:100],
+                "browser_config": browser_config,
+                "max_iterations": max_iterations
+            }
+        )
         
         try:
             # Run the agent
@@ -295,14 +149,20 @@ Begin the automation task now using the tools."""
                 "is_complete": False
             })
             
-            print(f"\n[🎭 PLAYWRIGHT] Test completed")
+            log_info(
+                "Playwright test completed",
+                node="playwright_agent.run"
+            )
             
             # Extract messages from result
             messages = result.get("messages", [])
             tool_calls = sum(1 for msg in messages if "Tool execution results" in str(getattr(msg, 'content', '')))
             
-            print(f"  - Total messages: {len(messages)}")
-            print(f"  - Tool calls: {tool_calls}")
+            log_info(
+                "Test execution summary",
+                node="playwright_agent.run",
+                extra={"total_messages": len(messages), "tool_calls": tool_calls}
+            )
             
             # Ensure browser cleanup
             try:
@@ -329,7 +189,11 @@ Begin the automation task now using the tools."""
             }
             
         except PlaywrightException as e:
-            print(f"[❌ PLAYWRIGHT] Browser error: {e}")
+            log_error(
+                "Playwright browser error",
+                error=e,
+                extra={"test_prompt": test_prompt[:100]}
+            )
             
             # Cleanup on error
             try:
@@ -346,7 +210,11 @@ Begin the automation task now using the tools."""
                 "final_response": str(e)
             }
         except LLMException as e:
-            print(f"[❌ PLAYWRIGHT] LLM error: {e}")
+            log_error(
+                "LLM error during Playwright test",
+                error=e,
+                extra={"test_prompt": test_prompt[:100]}
+            )
             
             # Cleanup on error
             try:
@@ -363,7 +231,11 @@ Begin the automation task now using the tools."""
                 "final_response": str(e)
             }
         except Exception as e:
-            print(f"[❌ PLAYWRIGHT] Unexpected agent error: {e}")
+            log_error(
+                "Unexpected Playwright agent error",
+                error=e,
+                extra={"test_prompt": test_prompt[:100]}
+            )
             
             # Cleanup on error
             try:

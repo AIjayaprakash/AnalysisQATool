@@ -5,6 +5,7 @@ from langchain_core.language_models.llms import LLM
 from langchain_core.outputs import LLMResult, Generation
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from openai import OpenAI
+from ..common.logger import log_info, log_error, log_llm
 
 
 class CustomOpenAILLM(LLM):
@@ -49,9 +50,11 @@ class CustomOpenAILLM(LLM):
             base_url=self.gateway_url,
         )
         
-        print(f"[INFO] Custom OpenAI LLM initialized:")
-        print(f"  Model: {self.model}")
-        print(f"  Gateway URL: {self.gateway_url}")
+        log_info(
+            "Custom OpenAI LLM initialized",
+            node="custom_openai.init",
+            extra={"model": self.model, "gateway_url": self.gateway_url}
+        )
     
     @property
     def _llm_type(self) -> str:
@@ -71,6 +74,13 @@ class CustomOpenAILLM(LLM):
             Generated text response
         """
         try:
+            log_llm(
+                "Calling custom OpenAI gateway",
+                operation="_call",
+                model=self.model,
+                extra={"prompt_length": len(prompt)}
+            )
+            
             chat_completion = self.client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
                 model=self.model,
@@ -80,10 +90,23 @@ class CustomOpenAILLM(LLM):
                 },
             )
             
-            return chat_completion.choices[0].message.content
+            response_content = chat_completion.choices[0].message.content
+            
+            log_llm(
+                "Custom OpenAI gateway call successful",
+                operation="_call",
+                model=self.model,
+                extra={"response_length": len(response_content)}
+            )
+            
+            return response_content
             
         except Exception as e:
-            print(f"[ERROR] Custom OpenAI LLM error: {e}")
+            log_error(
+                "Custom OpenAI LLM error",
+                error=e,
+                extra={"operation": "_call", "model": self.model}
+            )
             return f"Error calling custom OpenAI LLM: {str(e)}"
     
     def _generate(
@@ -132,7 +155,12 @@ class CustomOpenAILLM(LLM):
             else:
                 openai_messages.append({"role": "user", "content": str(msg.content)})
         
-        print(f"[DEBUG] Sending {len(openai_messages)} messages to custom OpenAI gateway")
+        log_llm(
+            f"Sending {len(openai_messages)} messages to custom OpenAI gateway",
+            operation="invoke",
+            model=self.model,
+            extra={"message_count": len(openai_messages)}
+        )
         
         try:
             chat_completion = self.client.chat.completions.create(
@@ -145,11 +173,21 @@ class CustomOpenAILLM(LLM):
             )
             
             response_content = chat_completion.choices[0].message.content
-            print(f"[DEBUG] Received response from custom OpenAI gateway: {len(response_content)} chars")
+            
+            log_llm(
+                f"Received response from custom OpenAI gateway: {len(response_content)} chars",
+                operation="invoke",
+                model=self.model,
+                extra={"response_length": len(response_content)}
+            )
             
             # Return proper AIMessage for LangChain compatibility
             return AIMessage(content=response_content)
             
         except Exception as e:
-            print(f"[ERROR] Custom OpenAI LLM error: {e}")
+            log_error(
+                "Custom OpenAI LLM invoke error",
+                error=e,
+                extra={"operation": "invoke", "model": self.model}
+            )
             return AIMessage(content=f"Error calling custom OpenAI LLM: {str(e)}")
