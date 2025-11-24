@@ -6,7 +6,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from llmops_api import parse_metadata_from_output
+from backend.app.llmops_api import parse_metadata_from_output
 import json
 
 # Sample agent output (what the Playwright agent returns)

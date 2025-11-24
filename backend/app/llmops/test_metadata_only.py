@@ -8,7 +8,7 @@ import sys
 sys.path.insert(0, r'e:\Kirsh Naik Academy\SeleniumMCPFlow\backend\app')
 
 from llmops import PlaywrightAgent, LLMOpsConfig
-from llmops_api import parse_metadata_from_output
+from backend.app.llmops_api import parse_metadata_from_output
 
 # Sample agent output (simulating what the agent returns)
 SAMPLE_OUTPUT = """Tool execution results:

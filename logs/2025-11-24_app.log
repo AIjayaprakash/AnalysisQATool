@@ -1,0 +1,11 @@
+2025-11-24 12:30:11,442 - app - INFO - [logger.py:171] - [main] Application started
+2025-11-24 12:30:11,443 - app - WARNING - [logger.py:196] - This is a warning message
+2025-11-24 12:30:11,444 - app - ERROR - [logger.py:226] - An error occurred | Error: Test error | Extra: {"context": "test"}
+Traceback (most recent call last):
+  File "E:\Kirsh Naik Academy\SeleniumMCPFlow\backend\app\llmops\common\logger.py", line 437, in <module>
+    raise ValueError("Test error")
+ValueError: Test error
+2025-11-24 12:30:11,452 - llm - INFO - [logger.py:294] - [LLM] LLM request | op=completion | model=gpt-4o | tokens=150
+2025-11-24 12:30:11,453 - langfuse - INFO - [logger.py:333] - [Langfuse] Langfuse trace | trace=trace123 | span=span456
+2025-11-24 12:30:11,455 - database - INFO - [logger.py:376] - [DB] Database query | op=SELECT | table=users | rows=10
+2025-11-24 12:30:11,456 - prompt - INFO - [logger.py:419] - [Prompt] Prompt generated | type=system | length=200 | template=test_template

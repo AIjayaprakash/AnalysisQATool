@@ -2,7 +2,7 @@
 Quick test to verify LLMOps API can start
 """
 
-from llmops_api import app
+from backend.app.llmops_api import app
 from fastapi.testclient import TestClient
 
 # Create test client

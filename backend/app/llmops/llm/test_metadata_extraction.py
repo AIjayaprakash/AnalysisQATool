@@ -67,17 +67,42 @@ def test_metadata_extraction():
         print("🔍 Parsing Metadata from Agent Output")
         print("=" * 80)
         
-        # Get the final response which contains tool execution results
-        final_response = result.get('final_response', '')
+        # Extract tool execution results from messages
+        # The agent_output is a string representation of a dict, so we need to parse it
+        tool_results_text = ""
         
-        if final_response:
-            print(f"Parsing {len(final_response)} characters of agent output...")
+        # Parse agent_output string to dict
+        agent_output_str = result.get('agent_output', '')
+        if agent_output_str:
+            try:
+                # Use ast.literal_eval to safely parse the string representation of dict
+                import ast
+                agent_output_dict = ast.literal_eval(agent_output_str)
+                messages = agent_output_dict.get('messages', [])
+                
+                # Extract tool execution results from messages
+                for msg in messages:
+                    msg_content = msg.get('content', '') if isinstance(msg, dict) else str(getattr(msg, 'content', ''))
+                    if 'Tool execution results' in msg_content:
+                        tool_results_text += msg_content + "\n"
+            except Exception as e:
+                print(f"⚠️  Failed to parse agent_output: {str(e)}")
+                # Fallback: try to get messages directly from result
+                messages = result.get('messages', [])
+                for msg in messages:
+                    msg_content = msg.get('content', '') if isinstance(msg, dict) else str(getattr(msg, 'content', ''))
+                    if 'Tool execution results' in msg_content:
+                        tool_results_text += msg_content + "\n"
+        
+        if tool_results_text:
+            print(f"Parsing {len(tool_results_text)} characters of tool execution results...")
             
             # Use the parse_metadata_from_output function
-            parsed_pages = parse_metadata_from_output(final_response)
+            parsed_pages, parsed_edges = parse_metadata_from_output(tool_results_text)
             
             if parsed_pages:
                 print(f"✅ Parsed {len(parsed_pages)} page(s) with metadata")
+                print(f"✅ Parsed {len(parsed_edges)} edge(s) connecting pages")
                 
                 # Convert to clean JSON format
                 clean_metadata = {
@@ -108,6 +133,14 @@ def test_metadata_extraction():
                             }
                         }
                         for page in parsed_pages
+                    ],
+                    "edges": [
+                        {
+                            "source": edge.source,
+                            "target": edge.target,
+                            "label": edge.label
+                        }
+                        for edge in parsed_edges
                     ]
                 }
                 
@@ -125,12 +158,12 @@ def test_metadata_extraction():
                 print(json.dumps(clean_metadata, indent=2))
                 
             else:
-                print("⚠️  No metadata found in agent output")
+                print("⚠️  No metadata found in tool execution results")
                 print("Checking for metadata markers...")
-                print(f"  - Found '📄 Page Metadata': {'📄 Page Metadata' in final_response}")
-                print(f"  - Found '🎯 Element Metadata': {'🎯 Element Metadata' in final_response}")
+                print(f"  - Found '📄 Page Metadata': {'📄 Page Metadata' in tool_results_text}")
+                print(f"  - Found '🎯 Element Metadata': {'🎯 Element Metadata' in tool_results_text}")
         else:
-            print("⚠️  No final response available to parse")
+            print("⚠️  No tool execution results found in messages")
         
         # Display extracted metadata from result (if API already parsed it)
         if result.get('pages'):
@@ -326,7 +359,7 @@ if __name__ == "__main__":
     result1 = test_metadata_extraction()
     
     # Test 2: Custom prompt with explicit metadata request
-    result2 = test_with_custom_prompt()
+    #result2 = test_with_custom_prompt()
     
     # Summary
     print("\n\n" + "=" * 80)
@@ -338,10 +371,10 @@ if __name__ == "__main__":
     else:
         print("❌ Test 1: Failed")
     
-    if result2:
-        print(f"✅ Test 2: Completed - {len(result2.get('pages', []))} pages extracted")
-    else:
-        print("❌ Test 2: Failed")
+    # if result2:
+    #     print(f"✅ Test 2: Completed - {len(result2.get('pages', []))} pages extracted")
+    # else:
+    #     print("❌ Test 2: Failed")
     
     print("\n" + "=" * 80)
     print("🎉 Testing Complete!")

@@ -4,12 +4,11 @@ Configuration Management for LLMOps
 Centralized configuration for LLM providers, models, and settings.
 """
 
-import os
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
-from dotenv import load_dotenv
-
-load_dotenv()
+from typing import Optional, Dict
+from pydantic import Field
+from pydantic_settings import BaseSettings
+from dataclasses import dataclass
+from llmops.common.exceptions import ConfigurationException
 
 
 @dataclass
@@ -21,38 +20,57 @@ class LLMConfig:
     temperature: float = 0.3
     max_tokens: int = 1024
     gateway_url: Optional[str] = None
-    extra_headers: Dict[str, str] = field(default_factory=dict)
+    extra_headers: Dict[str, str] = None
+    
+    def __post_init__(self):
+        if self.extra_headers is None:
+            self.extra_headers = {}
 
 
-@dataclass
-class LLMOpsConfig:
-    """Main configuration for LLMOps"""
+class LLMOpsConfig(BaseSettings):
+    """Main configuration for LLMOps - loads from .env file"""
+    
+    # Application Environment
+    app_env: str = Field(default="Test-Development", description="Application environment")
     
     # Auto-detect provider from environment
-    use_groq: bool = field(default_factory=lambda: os.getenv("USE_GROQ", "false").lower() == "true")
+    use_groq: bool = Field(default=False, description="Use Groq provider instead of OpenAI")
     
     # API Keys
-    groq_api_key: Optional[str] = field(default_factory=lambda: os.getenv("GROQ_API_KEY"))
-    openai_api_key: Optional[str] = field(default_factory=lambda: os.getenv("OPENAI_API_KEY"))
-    custom_api_key: Optional[str] = field(default_factory=lambda: os.getenv("CUSTOM_OPENAI_KEY"))
+    groq_api_key: Optional[str] = Field(default=None, description="Groq API key")
+    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
+    custom_api_key: Optional[str] = Field(default=None, alias="CUSTOM_OPENAI_KEY", description="Custom OpenAI API key")
     
     # Default models
-    groq_model: str = "llama-3.3-70b-versatile"
-    openai_model: str = "gpt-4o"
-    browser_type="edge"
+    groq_model: str = Field(default="llama-3.3-70b-versatile", description="Default Groq model")
+    openai_model: str = Field(default="gpt-4o", description="Default OpenAI model")
+    browser_type: str = Field(default="edge", description="Browser type for Playwright")
     
     # Custom gateway settings
-    custom_gateway_url: Optional[str] = field(
-        default_factory=lambda: os.getenv("CUSTOM_GATEWAY_URL", 
-                                          "https://gateway.ai-npe.humana.com/openai/deployments/{model}")
+    custom_gateway_url: Optional[str] = Field(
+        default="https://gateway.ai-npe.humana.com/openai/deployments/{model}",
+        description="Custom gateway URL"
     )
-    custom_gateway_headers: Dict[str, str] = field(default_factory=lambda: {
-        "ai-gateway-version": "v2"
-    })
+    custom_gateway_headers: Dict[str, str] = Field(
+        default_factory=lambda: {"ai-gateway-version": "v2"},
+        description="Custom gateway headers"
+    )
     
     # LLM settings
-    temperature: float = 0.3
-    max_tokens: int = 1024
+    temperature: float = Field(default=0.3, ge=0.0, le=2.0, description="LLM temperature")
+    max_tokens: int = Field(default=1024, gt=0, description="Maximum tokens")
+    
+    class Config:
+        """Pydantic configuration"""
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        case_sensitive = False
+        extra = "ignore"
+    
+    @property
+    def is_groq(self) -> bool:
+        """Check if using Groq provider"""
+        return self.use_groq
     
     def get_llm_config(self, provider: Optional[str] = None) -> LLMConfig:
         """
@@ -97,15 +115,15 @@ class LLMOpsConfig:
                 extra_headers=self.custom_gateway_headers
             )
         else:
-            raise ValueError(f"Unknown provider: {provider}")
+            raise ConfigurationException(f"Unknown provider: {provider}")
     
     def validate(self) -> bool:
         """Validate configuration"""
         if self.use_groq and not self.groq_api_key:
-            raise ValueError("GROQ_API_KEY not set but USE_GROQ=true")
+            raise ConfigurationException("GROQ_API_KEY not set but USE_GROQ=true", config_key="GROQ_API_KEY")
         
         if not self.use_groq and not (self.openai_api_key or self.custom_api_key):
-            raise ValueError("No API key found for OpenAI/Custom Gateway")
+            raise ConfigurationException("No API key found for OpenAI/Custom Gateway", config_key="OPENAI_API_KEY")
         
         return True
 

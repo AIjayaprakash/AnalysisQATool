@@ -16,6 +16,7 @@ from ..config import LLMOpsConfig
 from ..tools import get_playwright_tools
 from ..utils import get_playwright_state
 from ..prompts import get_prompt_manager
+from ..common.exceptions import PlaywrightException, StateException, LLMException
 
 
 class PlaywrightAgentState(TypedDict):
@@ -175,6 +176,10 @@ Begin the automation task now using the tools."""
                                 result = await tool_func.ainvoke(args)
                                 tool_results.append(f"✅ {tool_name}: {result}")
                                 print(f"[TOOL] {tool_name} -> {result}")
+                            except PlaywrightException as e:
+                                error_msg = f"❌ {tool_name} playwright error: {str(e)}"
+                                tool_results.append(error_msg)
+                                print(f"[ERROR] {error_msg}")
                             except Exception as e:
                                 error_msg = f"❌ {tool_name} error: {str(e)}"
                                 tool_results.append(error_msg)
@@ -323,8 +328,42 @@ Begin the automation task now using the tools."""
                 "final_response": str(messages[-1].content) if messages and hasattr(messages[-1], 'content') else "No response"
             }
             
+        except PlaywrightException as e:
+            print(f"[❌ PLAYWRIGHT] Browser error: {e}")
+            
+            # Cleanup on error
+            try:
+                await self.pw_state.cleanup()
+            except:
+                pass
+                
+            return {
+                "status": "error", 
+                "test_prompt": test_prompt,
+                "error": str(e),
+                "tool_calls": 0,
+                "total_messages": 0,
+                "final_response": str(e)
+            }
+        except LLMException as e:
+            print(f"[❌ PLAYWRIGHT] LLM error: {e}")
+            
+            # Cleanup on error
+            try:
+                await self.pw_state.cleanup()
+            except:
+                pass
+                
+            return {
+                "status": "error", 
+                "test_prompt": test_prompt,
+                "error": str(e),
+                "tool_calls": 0,
+                "total_messages": 0,
+                "final_response": str(e)
+            }
         except Exception as e:
-            print(f"[❌ PLAYWRIGHT] Agent error: {e}")
+            print(f"[❌ PLAYWRIGHT] Unexpected agent error: {e}")
             
             # Cleanup on error
             try:

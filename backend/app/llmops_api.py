@@ -24,7 +24,25 @@ from llmops import (
     get_config,
     PlaywrightAgent
 )
+from llmops.common.logger import (
+    log_info,
+    log_error,
+    log_warning,
+    log_llm,
+    log_prompt,
+    get_logger
+)
+from llmops.common.exceptions import (
+    ValidationException,
+    InvalidInputException,
+    StateException,
+    LLMException,
+    PlaywrightException,
+    ConfigurationException
+)
+
 config = get_config()
+logger = get_logger(__name__)
 # Initialize FastAPI app
 app = FastAPI(
     title="LLMOps Test Case Processing API",
@@ -94,6 +112,12 @@ class PageNode(BaseModel):
     y: int = Field(default=100, description="Y coordinate for visualization")
     metadata: PageMetadata = Field(..., description="Page metadata with elements")
 
+class Edge(BaseModel):
+    """Edge connecting two pages"""
+    source: str = Field(..., description="Source page node ID")
+    target: str = Field(..., description="Target page node ID")
+    label: str = Field(..., description="Edge label describing the action")
+
 class PlaywrightExecutionResponse(BaseModel):
     """Response model for Playwright automation execution"""
     test_id: str
@@ -105,10 +129,12 @@ class PlaywrightExecutionResponse(BaseModel):
     error_message: Optional[str] = None
     executed_at: str
     pages: List[PageNode] = Field(default_factory=list, description="Extracted page metadata")
+    edges: List[Edge] = Field(default_factory=list, description="Edges connecting pages")
 
 class SimplifiedMetadataResponse(BaseModel):
     """Simplified response with only page metadata"""
     pages: List[PageNode] = Field(..., description="Page metadata with key elements")
+    edges: List[Edge] = Field(default_factory=list, description="Edges connecting pages")
 
 class BatchProcessRequest(BaseModel):
     test_cases: List[TestCaseRequest]
@@ -123,6 +149,7 @@ class HealthResponse(BaseModel):
 @app.get("/", tags=["Health"])
 async def root():
     """Root endpoint"""
+    log_info("Root endpoint accessed", node="api")
     return {
         "message": "LLMOps Test Case Processing API",
         "version": "1.0.0",
@@ -133,8 +160,15 @@ async def root():
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health_check():
     """Health check endpoint with provider information"""
+    log_info("Health check requested", node="api")
     config = get_config()
     provider_info = generator.get_provider_info()
+    
+    log_info(
+        "Health check completed",
+        node="api",
+        extra={"provider": provider_info["provider"], "model": provider_info["model"]}
+    )
     
     return HealthResponse(
         status="healthy",
@@ -170,6 +204,19 @@ async def generate_single_prompt(request: TestCaseRequest):
         Generated prompt with metadata
     """
     try:
+        log_info(
+            f"Generating prompt for test case: {request.test_id}",
+            node="api.generate_prompt",
+            extra={"module": request.module, "functionality": request.functionality}
+        )
+        
+        # Validate input
+        if not request.test_id or not request.test_id.strip():
+            raise InvalidInputException("test_id is required", field="test_id")
+        
+        if not request.module or not request.module.strip():
+            raise InvalidInputException("module is required", field="module")
+        
         # Convert request to TestCase
         test_case = TestCase(
             test_id=request.test_id,
@@ -182,7 +229,15 @@ async def generate_single_prompt(request: TestCaseRequest):
         )
         
         # Generate prompt
+        log_llm("Calling LLM to generate prompt", operation="generate_prompt", model=config.openai_model if not config.use_groq else config.groq_model)
         prompt = generator.generate_playwright_prompt(test_case)
+        
+        log_prompt(
+            "Prompt generated successfully",
+            prompt_type="playwright",
+            prompt_length=len(prompt.generated_prompt) if prompt.generated_prompt else 0,
+            extra={"test_id": request.test_id}
+        )
         
         return TestCaseResponse(
             test_id=prompt.test_case.test_id,
@@ -193,7 +248,14 @@ async def generate_single_prompt(request: TestCaseRequest):
             generated_at=prompt.generated_at.isoformat() if prompt.generated_at else datetime.now().isoformat()
         )
     
+    except InvalidInputException as e:
+        log_error(f"Invalid input for prompt generation", error=e)
+        raise HTTPException(status_code=400, detail=str(e))
+    except LLMException as e:
+        log_error(f"LLM error during prompt generation", error=e)
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
+        log_error(f"Unexpected error generating prompt", error=e)
         raise HTTPException(status_code=500, detail=f"Error generating prompt: {str(e)}")
 
 
@@ -433,16 +495,20 @@ async def change_provider(provider: str):
         raise HTTPException(status_code=500, detail=f"Error changing provider: {str(e)}")
 
 
-def parse_metadata_from_output(output: str) -> List[PageNode]:
+def parse_metadata_from_output(output: str) -> tuple[List[PageNode], List[Edge]]:
     """
     Parse metadata from agent output
     
     Looks for playwright_get_page_metadata tool outputs and structures them
-    into PageNode format with ElementMetadata
+    into PageNode format with ElementMetadata, and extracts edges between pages
+    
+    Returns:
+        tuple: (pages, edges) - List of PageNode objects and list of Edge objects
     """
     import re
     
     pages = []
+    edges = []
     page_counter = 1
     
     # Extract all metadata blocks from the output
@@ -467,57 +533,70 @@ def parse_metadata_from_output(output: str) -> List[PageNode]:
         elements = []
         element_counter = 1
         
-        # Look for element blocks after this page block
-        element_pattern = r'🎯 Element Metadata \(Found \d+ element\(s\)\):(.*?)(?=📄 Page Metadata:|🎯 Element Metadata:|✅ playwright|$)'
+        # Look for the element metadata block after this page block
+        element_pattern = r'🎯 Element Metadata \(Found (\d+) element\(s\)\):(.*?)(?=📄 Page Metadata:|✅ playwright_screenshot|✅ playwright_close|$)'
         element_search_start = page_match.end()
-        remaining_output = output[element_search_start:element_search_start + 5000]  # Look ahead 5000 chars
+        remaining_output = output[element_search_start:element_search_start + 10000]  # Look ahead 10000 chars
         
-        element_matches = re.finditer(element_pattern, remaining_output, re.DOTALL)
+        element_match = re.search(element_pattern, remaining_output, re.DOTALL)
         
-        for elem_match in element_matches:
-            elem_block = elem_match.group(1)
+        if element_match:
+            elem_count = int(element_match.group(1))
+            elem_block = element_match.group(2)
             
-            # Extract element attributes
-            tag_match = re.search(r'•\s*Tag:\s*<([^>]+)>', elem_block)
-            type_match = re.search(r'•\s*Type:\s*([^\n]+)', elem_block)
-            text_match = re.search(r'•\s*Text:\s*([^\n]+)', elem_block)
-            id_match = re.search(r'•\s*ID:\s*([^\n]+)', elem_block)
-            name_match = re.search(r'•\s*Name:\s*([^\n]+)', elem_block)
-            class_match = re.search(r'•\s*Class:\s*([^\n]+)', elem_block)
-            href_match = re.search(r'•\s*Href:\s*([^\n]+)', elem_block)
-            input_type_match = re.search(r'•\s*Input Type:\s*([^\n]+)', elem_block)
+            # Split the element block by "Element X:" pattern to get individual elements
+            # Each element section starts with patterns like "Element 1:", "Element 2:", etc.
+            individual_element_pattern = r'(?:Element \d+:|•\s*Selector:)'
+            element_sections = re.split(individual_element_pattern, elem_block)
             
-            tag = tag_match.group(1) if tag_match else "unknown"
-            element_type = type_match.group(1) if type_match else tag
-            
-            # Determine element type from tag if not specified
-            if element_type == tag:
-                if tag == "a":
-                    element_type = "link"
-                elif tag == "button":
-                    element_type = "button"
-                elif tag == "input":
-                    element_type = "input"
-                elif tag == "form":
-                    element_type = "form"
-            
-            element = ElementMetadata(
-                id=f"element_{element_counter}",
-                type=element_type,
-                tag=tag,
-                text=text_match.group(1).strip() if text_match and text_match.group(1).strip() not in ["None", "null"] else None,
-                element_id=id_match.group(1).strip() if id_match and id_match.group(1).strip() not in ["None", "null"] else None,
-                name=name_match.group(1).strip() if name_match and name_match.group(1).strip() not in ["None", "null"] else None,
-                class_name=class_match.group(1).strip() if class_match and class_match.group(1).strip() not in ["None", "null"] else None,
-                href=href_match.group(1).strip() if href_match and href_match.group(1).strip() not in ["None", "null"] else None,
-                input_type=input_type_match.group(1).strip() if input_type_match and input_type_match.group(1).strip() not in ["None", "null"] else None,
-                depends_on=[]
-            )
-            
-            elements.append(element)
-            element_counter += 1
-            # Only get first element block after this page
-            break
+            # Process each element section
+            for section in element_sections:
+                if not section.strip():
+                    continue
+                
+                # Extract element attributes from this section
+                tag_match = re.search(r'•\s*Tag:\s*<([^>]+)>', section)
+                type_match = re.search(r'•\s*Type:\s*([^\n]+)', section)
+                text_match = re.search(r'•\s*Text:\s*([^\n]+)', section)
+                id_match = re.search(r'•\s*ID:\s*([^\n]+)', section)
+                name_match = re.search(r'•\s*Name:\s*([^\n]+)', section)
+                class_match = re.search(r'•\s*Class:\s*([^\n]+)', section)
+                href_match = re.search(r'•\s*Href:\s*([^\n]+)', section)
+                input_type_match = re.search(r'•\s*Input Type:\s*([^\n]+)', section)
+                
+                # Skip if no tag found (not a valid element section)
+                if not tag_match:
+                    continue
+                
+                tag = tag_match.group(1).strip()
+                element_type = type_match.group(1).strip() if type_match else tag
+                
+                # Determine element type from tag if not specified
+                if element_type == tag:
+                    if tag == "a":
+                        element_type = "link"
+                    elif tag == "button":
+                        element_type = "button"
+                    elif tag == "input":
+                        element_type = "input"
+                    elif tag == "form":
+                        element_type = "form"
+                
+                element = ElementMetadata(
+                    id=f"element_{element_counter}",
+                    type=element_type,
+                    tag=tag,
+                    text=text_match.group(1).strip() if text_match and text_match.group(1).strip() not in ["None", "null", ""] else None,
+                    element_id=id_match.group(1).strip() if id_match and id_match.group(1).strip() not in ["None", "null", ""] else None,
+                    name=name_match.group(1).strip() if name_match and name_match.group(1).strip() not in ["None", "null", ""] else None,
+                    class_name=class_match.group(1).strip() if class_match and class_match.group(1).strip() not in ["None", "null", ""] else None,
+                    href=href_match.group(1).strip() if href_match and href_match.group(1).strip() not in ["None", "null", ""] else None,
+                    input_type=input_type_match.group(1).strip() if input_type_match and input_type_match.group(1).strip() not in ["None", "null", ""] else None,
+                    depends_on=[]
+                )
+                
+                elements.append(element)
+                element_counter += 1
         
         # Create page node
         page_node = PageNode(
@@ -534,10 +613,36 @@ def parse_metadata_from_output(output: str) -> List[PageNode]:
         
         pages.append(page_node)
         page_counter += 1
-        # Only process first page metadata
-        break
     
-    return pages
+    # Extract edges from navigation actions
+    # Look for patterns like "✅ playwright_click: ✅ Clicked on element: <text>"
+    # followed by navigation to a new page
+    click_pattern = r'✅ playwright_click:.*?(?:Clicked|Click).*?[:\s]+([^\n]{0,50}?)(?:\n|$)'
+    click_matches = list(re.finditer(click_pattern, output, re.IGNORECASE))
+    
+    # Create edges between consecutive pages based on click actions
+    for i in range(len(pages) - 1):
+        source_id = pages[i].id
+        target_id = pages[i + 1].id
+        
+        # Try to find the click action between these pages
+        edge_label = "Navigate"
+        
+        # Look for click action text near this page transition
+        if i < len(click_matches):
+            click_text = click_matches[i].group(1).strip()
+            # Truncate long text
+            if len(click_text) > 25:
+                click_text = click_text[:22] + "..."
+            edge_label = f"Click {click_text}" if click_text else "Click"
+        
+        edges.append(Edge(
+            source=source_id,
+            target=target_id,
+            label=edge_label
+        ))
+    
+    return pages, edges
 
 
 @app.post("/execute-playwright", response_model=PlaywrightExecutionResponse, tags=["Playwright Automation"])
@@ -562,6 +667,23 @@ async def execute_playwright_automation(request: PlaywrightExecutionRequest):
     import re
     
     try:
+        # Validate input
+        if not request.test_id or not request.test_id.strip():
+            raise InvalidInputException("test_id is required", field="test_id")
+        
+        if not request.generated_prompt or not request.generated_prompt.strip():
+            raise InvalidInputException("generated_prompt is required", field="generated_prompt")
+        
+        log_info(
+            f"Starting Playwright automation for test: {request.test_id}",
+            node="api.execute_playwright",
+            extra={
+                "browser_type": config.browser_type,
+                "headless": request.headless,
+                "max_iterations": request.max_iterations
+            }
+        )
+        
         start_time = time.time()
         
         # Initialize Playwright Agent
@@ -571,9 +693,11 @@ async def execute_playwright_automation(request: PlaywrightExecutionRequest):
         
         # Initialize Playwright Agent with OpenAI or Groq
         # Auto-detect provider from config (USE_GROQ env variable)
+        log_info("Initializing Playwright Agent", node="playwright")
         agent = PlaywrightAgent(config=config)
         
         # Execute the automation with the generated prompt
+        log_info(f"Executing automation with prompt length: {len(request.generated_prompt)}", node="playwright")
         result = await agent.run(
             test_prompt=request.generated_prompt,
             max_iterations=request.max_iterations,
@@ -581,6 +705,11 @@ async def execute_playwright_automation(request: PlaywrightExecutionRequest):
         )
         
         execution_time = time.time() - start_time
+        log_info(
+            f"Playwright execution completed in {execution_time:.2f}s",
+            node="playwright",
+            extra={"test_id": request.test_id, "execution_time": execution_time}
+        )
         
         # Parse the result to extract useful information
         agent_output = str(result) if result else "No output"
@@ -602,7 +731,14 @@ async def execute_playwright_automation(request: PlaywrightExecutionRequest):
         screenshots.extend(screenshot_matches)
         
         # Parse metadata from the final response which contains tool execution results
-        pages = parse_metadata_from_output(final_response)
+        log_info("Parsing metadata from execution results", node="playwright")
+        pages, edges = parse_metadata_from_output(final_response)
+        
+        log_info(
+            f"Automation {status} - Extracted {len(pages)} pages and {len(edges)} edges",
+            node="playwright",
+            extra={"test_id": request.test_id, "status": status, "screenshots": len(screenshots)}
+        )
         
         return PlaywrightExecutionResponse(
             test_id=request.test_id,
@@ -613,10 +749,19 @@ async def execute_playwright_automation(request: PlaywrightExecutionRequest):
             screenshots=screenshots,
             error_message=None if is_success else "Automation encountered issues. Check agent_output for details.",
             executed_at=datetime.now().isoformat(),
-            pages=pages
+            pages=pages,
+            edges=edges
         )
         
-    except Exception as e:
+    except InvalidInputException as e:
+        log_error(f"Invalid input for Playwright execution", error=e)
+        raise HTTPException(status_code=400, detail=str(e))
+    except PlaywrightException as e:
+        log_error(
+            f"Playwright browser error for test: {request.test_id}",
+            error=e,
+            extra={"test_id": request.test_id}
+        )
         execution_time = time.time() - start_time
         return PlaywrightExecutionResponse(
             test_id=request.test_id,
@@ -627,7 +772,46 @@ async def execute_playwright_automation(request: PlaywrightExecutionRequest):
             screenshots=[],
             error_message=str(e),
             executed_at=datetime.now().isoformat(),
-            pages=[]
+            pages=[],
+            edges=[]
+        )
+    except StateException as e:
+        log_error(
+            f"Playwright state error for test: {request.test_id}",
+            error=e,
+            extra={"test_id": request.test_id}
+        )
+        execution_time = time.time() - start_time
+        return PlaywrightExecutionResponse(
+            test_id=request.test_id,
+            status="error",
+            execution_time=round(execution_time, 2),
+            steps_executed=0,
+            agent_output="",
+            screenshots=[],
+            error_message=str(e),
+            executed_at=datetime.now().isoformat(),
+            pages=[],
+            edges=[]
+        )
+    except Exception as e:
+        log_error(
+            f"Unexpected error during Playwright automation for test: {request.test_id}",
+            error=e,
+            extra={"test_id": request.test_id}
+        )
+        execution_time = time.time() - start_time
+        return PlaywrightExecutionResponse(
+            test_id=request.test_id,
+            status="error",
+            execution_time=round(execution_time, 2),
+            steps_executed=0,
+            agent_output="",
+            screenshots=[],
+            error_message=str(e),
+            executed_at=datetime.now().isoformat(),
+            pages=[],
+            edges=[]
         )
 
 
@@ -673,8 +857,8 @@ async def execute_playwright_get_metadata(request: PlaywrightExecutionRequest):
     # Call the full execution endpoint
     full_response = await execute_playwright_automation(request)
     
-    # Return only the pages data
-    return SimplifiedMetadataResponse(pages=full_response.pages)
+    # Return only the pages and edges data
+    return SimplifiedMetadataResponse(pages=full_response.pages, edges=full_response.edges)
 
 
 @app.post("/execute-playwright-from-testcase", response_model=PlaywrightExecutionResponse, tags=["Playwright Automation"])
@@ -740,6 +924,18 @@ if __name__ == "__main__":
     print(f"\n✓ Provider: {provider_info['provider']}")
     print(f"✓ Model: {provider_info['model']}")
     print(f"✓ Temperature: {provider_info['temperature']}")
+    
+    # Log startup information
+    log_info(
+        "Starting LLMOps API Server",
+        node="startup",
+        extra={
+            "app_env": config.app_env,
+            "provider": provider_info['provider'],
+            "model": provider_info['model'],
+            "browser_type": config.browser_type
+        }
+    )
     
     print("\n" + "=" * 70)
     print("Starting server on http://localhost:8000")

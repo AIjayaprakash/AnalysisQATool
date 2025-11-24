@@ -1,0 +1,15 @@
+{
+  "pages": [
+    {
+      "id": "page_1",
+      "label": "Example Domain (example.com)",
+      "x": 200,
+      "y": 100,
+      "metadata": {
+        "url": "https://example.com/",
+        "title": "Example Domain",
+        "key_elements": []
+      }
+    }
+  ]
+}

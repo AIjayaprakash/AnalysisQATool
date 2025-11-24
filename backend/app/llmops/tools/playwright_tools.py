@@ -4,6 +4,7 @@ import os
 from typing import List, Optional
 from langchain_core.tools import tool
 from ..utils.playwright_state import get_playwright_state
+from ..common.exceptions import PlaywrightException
 
 
 # Get global playwright state

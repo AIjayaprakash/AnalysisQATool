@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any
 from abc import ABC, abstractmethod
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
+from ..common.exceptions import LLMException, ConfigurationException
 
 
 class LLMProvider(ABC):
@@ -70,12 +71,22 @@ class GroqProvider(LLMProvider):
             
         Returns:
             Generated text response
-        """
-        if not self._llm:
-            self._llm = self.get_llm(**kwargs)
         
-        response = self._llm.invoke(prompt)
-        return response.content if hasattr(response, 'content') else str(response)
+        Raises:
+            LLMException: If LLM invocation fails
+        """
+        try:
+            if not self._llm:
+                self._llm = self.get_llm(**kwargs)
+            
+            response = self._llm.invoke(prompt)
+            return response.content if hasattr(response, 'content') else str(response)
+        except Exception as e:
+            raise LLMException(
+                f"Groq LLM invocation failed: {str(e)}",
+                provider="groq",
+                model=self.model_name
+            )
 
 
 class OpenAIProvider(LLMProvider):
@@ -128,12 +139,22 @@ class OpenAIProvider(LLMProvider):
             
         Returns:
             Generated text response
-        """
-        if not self._llm:
-            self._llm = self.get_llm(**kwargs)
         
-        response = self._llm.invoke(prompt)
-        return response.content if hasattr(response, 'content') else str(response)
+        Raises:
+            LLMException: If LLM invocation fails
+        """
+        try:
+            if not self._llm:
+                self._llm = self.get_llm(**kwargs)
+            
+            response = self._llm.invoke(prompt)
+            return response.content if hasattr(response, 'content') else str(response)
+        except Exception as e:
+            raise LLMException(
+                f"OpenAI LLM invocation failed: {str(e)}",
+                provider="openai",
+                model=self.model_name
+            )
 
 
 def get_llm_provider(provider_type: Optional[str] = None, 

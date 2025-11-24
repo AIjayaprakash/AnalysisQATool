@@ -7,6 +7,7 @@ from ..llm import LLMProvider, get_llm_provider
 from ..prompts import PromptManager, get_prompt_manager
 from ..models import TestCase, TestCasePrompt
 from ..utils import ExcelReader
+from ..common.exceptions import LLMException, InvalidInputException, DatabaseException
 
 
 class TestCaseGenerator:
@@ -45,9 +46,21 @@ class TestCaseGenerator:
         
         Returns:
             List of TestCase objects
+        
+        Raises:
+            InvalidInputException: If excel_path is invalid
+            DatabaseException: If reading from Excel fails
         """
-        reader = ExcelReader(excel_path, sheet_name)
-        return reader.get_test_cases(**column_mappings)
+        if not excel_path or not excel_path.strip():
+            raise InvalidInputException("Excel path is required", field="excel_path")
+        
+        try:
+            reader = ExcelReader(excel_path, sheet_name)
+            return reader.get_test_cases(**column_mappings)
+        except FileNotFoundError as e:
+            raise DatabaseException(f"Excel file not found: {excel_path}", operation="read", table=sheet_name)
+        except Exception as e:
+            raise DatabaseException(f"Failed to read test cases: {str(e)}", operation="read", table=sheet_name)
     
     def generate_playwright_prompt(self, test_case: TestCase) -> TestCasePrompt:
         """
@@ -58,23 +71,35 @@ class TestCaseGenerator:
         
         Returns:
             TestCasePrompt with generated prompt
+        
+        Raises:
+            LLMException: If LLM generation fails
         """
-        # Get prompts from manager
-        system_prompt, user_prompt = self.prompt_manager.get_test_case_conversion_prompts(test_case)
-        
-        # Combine for LLM
-        full_prompt = f"{system_prompt}\n\n{user_prompt}"
-        
-        # Generate with LLM
-        generated_prompt = self.llm_provider.invoke(full_prompt)
-        
-        return TestCasePrompt(
-            test_case=test_case,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            generated_prompt=generated_prompt,
-            generated_at=datetime.now()
-        )
+        try:
+            # Get prompts from manager
+            system_prompt, user_prompt = self.prompt_manager.get_test_case_conversion_prompts(test_case)
+            
+            # Combine for LLM
+            full_prompt = f"{system_prompt}\n\n{user_prompt}"
+            
+            # Generate with LLM
+            generated_prompt = self.llm_provider.invoke(full_prompt)
+            
+            return TestCasePrompt(
+                test_case=test_case,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                generated_prompt=generated_prompt,
+                generated_at=datetime.now()
+            )
+        except Exception as e:
+            provider_name = "groq" if self.config.use_groq else "openai"
+            model_name = self.config.get_llm_config(provider_name).model
+            raise LLMException(
+                f"Failed to generate prompt: {str(e)}",
+                provider=provider_name,
+                model=model_name
+            )
     
     def generate_batch(self, test_cases: List[TestCase]) -> List[TestCasePrompt]:
         """
@@ -91,8 +116,19 @@ class TestCaseGenerator:
             try:
                 prompt = self.generate_playwright_prompt(test_case)
                 prompts.append(prompt)
+            except LLMException as e:
+                print(f"LLM error generating prompt for {test_case.test_id}: {str(e)}")
+                # Create error prompt
+                error_prompt = TestCasePrompt(
+                    test_case=test_case,
+                    system_prompt="Error",
+                    user_prompt="Error",
+                    generated_prompt=f"LLM Error: {str(e)}",
+                    generated_at=datetime.now()
+                )
+                prompts.append(error_prompt)
             except Exception as e:
-                print(f"Error generating prompt for {test_case.test_id}: {str(e)}")
+                print(f"Unexpected error generating prompt for {test_case.test_id}: {str(e)}")
                 # Create error prompt
                 error_prompt = TestCasePrompt(
                     test_case=test_case,
