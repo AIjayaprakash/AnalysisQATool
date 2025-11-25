@@ -137,6 +137,19 @@ class SimplifiedMetadataResponse(BaseModel):
     pages: List[PageNode] = Field(..., description="Page metadata with key elements")
     edges: List[Edge] = Field(default_factory=list, description="Edges connecting pages")
 
+class CompleteMetadataResponse(BaseModel):
+    """Complete metadata response with full execution details"""
+    test_id: str = Field(..., description="Test case ID")
+    status: str = Field(..., description="Execution status: success, failed, or error")
+    execution_time: float = Field(..., description="Execution time in seconds")
+    steps_executed: int = Field(..., description="Number of steps executed")
+    agent_output: str = Field(..., description="Complete agent output with all tool executions")
+    pages: List[PageNode] = Field(default_factory=list, description="Parsed page metadata with key elements")
+    edges: List[Edge] = Field(default_factory=list, description="Edges connecting pages")
+    screenshots: List[str] = Field(default_factory=list, description="Screenshot filenames")
+    error_message: Optional[str] = Field(None, description="Error message if execution failed")
+    executed_at: str = Field(..., description="Timestamp of execution")
+
 class ExcelAutomationRequest(BaseModel):
     """Request model for Excel-based complete automation"""
     sheet_name: str = Field(default="Sheet1", description="Name of the Excel sheet to read")
@@ -925,7 +938,7 @@ async def execute_playwright_from_testcase(request: TestCaseRequest):
         raise HTTPException(status_code=500, detail=f"Error in combined execution: {str(e)}")
 
 
-@app.post("/execute-from-excel", response_model=SimplifiedMetadataResponse, tags=["Complete Automation"])
+@app.post("/execute-from-excel", response_model=CompleteMetadataResponse, tags=["Complete Automation"])
 async def execute_complete_automation_from_excel(
     file: UploadFile = File(..., description="Excel file with test cases"),
     sheet_name: str = "Sheet1",
@@ -942,6 +955,7 @@ async def execute_complete_automation_from_excel(
     2. ✅ Generate Playwright prompt from test case
     3. ✅ Execute Playwright automation
     4. ✅ Extract structured JSON with nodes and edges
+    5. ✅ Parse complete metadata with agent output
     
     Args:
         file: Excel file containing test cases
@@ -952,12 +966,25 @@ async def execute_complete_automation_from_excel(
         max_iterations: Maximum automation iterations (default: 10)
     
     Returns:
-        SimplifiedMetadataResponse with:
+        CompleteMetadataResponse with:
+        - test_id: Test case ID
+        - status: Execution status (success/failed/error)
+        - execution_time: Execution time in seconds
+        - steps_executed: Number of automation steps
+        - agent_output: Complete agent output with all details
         - pages: Array of page nodes with structured metadata
         - edges: Array of edges connecting pages
+        - screenshots: List of screenshot filenames
+        - error_message: Error details if failed
+        - executed_at: Execution timestamp
     
     Example Response:
     {
+        "test_id": "TC_LOGIN_001",
+        "status": "success",
+        "execution_time": 15.43,
+        "steps_executed": 8,
+        "agent_output": "✅ playwright_navigate: Navigated to https://example.com\n📄 Page Metadata:\n  • URL: https://example.com/\n  • Title: Example Domain\n🎯 Element Metadata (Found 1 element(s)):\n  • Selector: a\n  • Tag: <a>\n  • Text: More information...\n  • Href: https://www.iana.org/domains/example",
         "pages": [
             {
                 "id": "page_1",
@@ -967,7 +994,15 @@ async def execute_complete_automation_from_excel(
                 "metadata": {
                     "url": "https://example.com/",
                     "title": "Example Domain",
-                    "key_elements": [...]
+                    "key_elements": [
+                        {
+                            "id": "element_1",
+                            "type": "link",
+                            "tag": "a",
+                            "text": "More information...",
+                            "href": "https://www.iana.org/domains/example"
+                        }
+                    ]
                 }
             }
         ],
@@ -975,9 +1010,12 @@ async def execute_complete_automation_from_excel(
             {
                 "source": "page_1",
                 "target": "page_2",
-                "label": "Navigate to About"
+                "label": "Click More information..."
             }
-        ]
+        ],
+        "screenshots": ["screenshot_1732567890.png"],
+        "error_message": null,
+        "executed_at": "2025-11-25T10:30:45.123456"
     }
     
     Usage:
@@ -1066,11 +1104,19 @@ async def execute_complete_automation_from_excel(
         
         full_response = await execute_playwright_automation(exec_request)
         
-        # Step 6: Extract and return structured JSON with nodes and edges
-        log_info("Step 6: Extracting structured metadata (nodes and edges)", node="complete_automation.step6")
-        result = SimplifiedMetadataResponse(
+        # Step 6: Extract and return complete metadata including agent output
+        log_info("Step 6: Extracting complete metadata with agent output", node="complete_automation.step6")
+        result = CompleteMetadataResponse(
+            test_id=full_response.test_id,
+            status=full_response.status,
+            execution_time=full_response.execution_time,
+            steps_executed=full_response.steps_executed,
+            agent_output=full_response.agent_output,
             pages=full_response.pages,
-            edges=full_response.edges
+            edges=full_response.edges,
+            screenshots=full_response.screenshots,
+            error_message=full_response.error_message,
+            executed_at=full_response.executed_at
         )
         
         log_info(
@@ -1078,9 +1124,10 @@ async def execute_complete_automation_from_excel(
             node="complete_automation.success",
             extra={
                 "test_id": selected_test_case.test_id,
+                "status": result.status,
                 "pages_extracted": len(result.pages),
                 "edges_extracted": len(result.edges),
-                "execution_time": full_response.execution_time
+                "execution_time": result.execution_time
             }
         )
         
