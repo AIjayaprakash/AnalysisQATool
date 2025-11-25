@@ -44,7 +44,7 @@ class LLMOpsConfig(BaseSettings):
     # Default models
     groq_model: str = Field(default="llama-3.3-70b-versatile", description="Default Groq model")
     openai_model: str = Field(default="gpt-4o", description="Default OpenAI model")
-    browser_type: str = Field(default="edge", description="Browser type for Playwright")
+    browser_type: str = Field(default="chromium", description="Browser type for Playwright (chromium, firefox, webkit, edge)")
     
     # Custom gateway settings
     custom_gateway_url: Optional[str] = Field(

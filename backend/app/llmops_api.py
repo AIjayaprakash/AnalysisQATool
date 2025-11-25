@@ -62,6 +62,7 @@ class TestCaseRequest(BaseModel):
     steps: Optional[str] = None
     expected_result: Optional[str] = None
     priority: str = "Medium"
+    browser_type: str = Field(default="chromium", description="Browser type: chromium, firefox, webkit, or edge")
 
 class TestCaseResponse(BaseModel):
     test_id: str
@@ -81,7 +82,7 @@ class PlaywrightExecutionRequest(BaseModel):
     """Request model for Playwright automation execution"""
     test_id: str = Field(..., description="Test case ID from generated prompt")
     generated_prompt: str = Field(..., description="Generated Playwright prompt from /generate-prompt endpoint")
-    browser_type: str = Field(default="chromium", description="Browser type: chromium, firefox, or webkit")
+    browser_type: str = Field(default="chromium", description="Browser type: chromium, firefox, webkit, or edge")
     headless: bool = Field(default=False, description="Run browser in headless mode")
     max_iterations: int = Field(default=10, description="Maximum automation iterations")
     
@@ -135,6 +136,14 @@ class SimplifiedMetadataResponse(BaseModel):
     """Simplified response with only page metadata"""
     pages: List[PageNode] = Field(..., description="Page metadata with key elements")
     edges: List[Edge] = Field(default_factory=list, description="Edges connecting pages")
+
+class ExcelAutomationRequest(BaseModel):
+    """Request model for Excel-based complete automation"""
+    sheet_name: str = Field(default="Sheet1", description="Name of the Excel sheet to read")
+    test_id: Optional[str] = Field(None, description="Specific test ID to execute (if None, executes first test case)")
+    browser_type: str = Field(default="chromium", description="Browser type: chromium, firefox, webkit, or edge")
+    headless: bool = Field(default=False, description="Run browser in headless mode")
+    max_iterations: int = Field(default=10, description="Maximum automation iterations")
 
 class BatchProcessRequest(BaseModel):
     test_cases: List[TestCaseRequest]
@@ -678,7 +687,7 @@ async def execute_playwright_automation(request: PlaywrightExecutionRequest):
             f"Starting Playwright automation for test: {request.test_id}",
             node="api.execute_playwright",
             extra={
-                "browser_type": config.browser_type,
+                "browser_type": request.browser_type,
                 "headless": request.headless,
                 "max_iterations": request.max_iterations
             }
@@ -701,7 +710,13 @@ async def execute_playwright_automation(request: PlaywrightExecutionRequest):
         result = await agent.run(
             test_prompt=request.generated_prompt,
             max_iterations=request.max_iterations,
-            browser_config={"browser_type": config.browser_type, "headless": request.headless}
+            browser_config={"browser_type": request.browser_type, "headless": request.headless}
+        )
+        
+        log_info(
+            f"Using browser type from request: {request.browser_type}",
+            node="playwright",
+            extra={"browser_type": request.browser_type}
         )
         
         execution_time = time.time() - start_time
@@ -897,7 +912,7 @@ async def execute_playwright_from_testcase(request: TestCaseRequest):
         exec_request = PlaywrightExecutionRequest(
             test_id=request.test_id,
             generated_prompt=generated_prompt,
-            browser_type="chromium",
+            browser_type=request.browser_type,  # Use browser_type from test case
             headless=False,
             max_iterations=10
         )
@@ -908,6 +923,187 @@ async def execute_playwright_from_testcase(request: TestCaseRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error in combined execution: {str(e)}")
+
+
+@app.post("/execute-from-excel", response_model=SimplifiedMetadataResponse, tags=["Complete Automation"])
+async def execute_complete_automation_from_excel(
+    file: UploadFile = File(..., description="Excel file with test cases"),
+    sheet_name: str = "Sheet1",
+    test_id: Optional[str] = None,
+    browser_type: str = "chromium",
+    headless: bool = False,
+    max_iterations: int = 10
+):
+    """
+    🎯 FINAL COMBINED ENDPOINT - Complete End-to-End Automation
+    
+    This endpoint performs ALL steps in one call:
+    1. ✅ Read Excel file with test cases
+    2. ✅ Generate Playwright prompt from test case
+    3. ✅ Execute Playwright automation
+    4. ✅ Extract structured JSON with nodes and edges
+    
+    Args:
+        file: Excel file containing test cases
+        sheet_name: Name of the sheet to read (default: "Sheet1")
+        test_id: Specific test ID to execute (if None, uses first test case)
+        browser_type: Browser to use - chromium, firefox, webkit, or edge (default: "chromium")
+        headless: Run browser in headless mode (default: False)
+        max_iterations: Maximum automation iterations (default: 10)
+    
+    Returns:
+        SimplifiedMetadataResponse with:
+        - pages: Array of page nodes with structured metadata
+        - edges: Array of edges connecting pages
+    
+    Example Response:
+    {
+        "pages": [
+            {
+                "id": "page_1",
+                "label": "Example Domain (example.com)",
+                "x": 200,
+                "y": 100,
+                "metadata": {
+                    "url": "https://example.com/",
+                    "title": "Example Domain",
+                    "key_elements": [...]
+                }
+            }
+        ],
+        "edges": [
+            {
+                "source": "page_1",
+                "target": "page_2",
+                "label": "Navigate to About"
+            }
+        ]
+    }
+    
+    Usage:
+        curl -X POST "http://localhost:8000/execute-from-excel" \\
+             -F "file=@test_cases.xlsx" \\
+             -F "sheet_name=Sheet1" \\
+             -F "browser_type=edge" \\
+             -F "headless=false"
+    """
+    log_info(
+        "Starting complete automation from Excel",
+        node="complete_automation",
+        extra={
+            "filename": file.filename,
+            "sheet_name": sheet_name,
+            "test_id": test_id,
+            "browser_type": browser_type,
+            "headless": headless
+        }
+    )
+    
+    # Validate file type
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx or .xls)")
+    
+    tmp_path = None
+    try:
+        # Step 1: Save uploaded Excel file to temp location
+        log_info("Step 1: Saving Excel file", node="complete_automation.step1")
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+            shutil.copyfileobj(file.file, tmp_file)
+            tmp_path = tmp_file.name
+        
+        # Step 2: Read test cases from Excel
+        log_info("Step 2: Reading test cases from Excel", node="complete_automation.step2")
+        test_cases = generator.read_test_cases(tmp_path, sheet_name=sheet_name)
+        
+        if not test_cases:
+            raise HTTPException(status_code=404, detail="No test cases found in Excel file")
+        
+        log_info(
+            f"Found {len(test_cases)} test cases in Excel",
+            node="complete_automation.step2",
+            extra={"total_test_cases": len(test_cases)}
+        )
+        
+        # Step 3: Select test case to execute
+        selected_test_case = None
+        if test_id:
+            # Find specific test case by ID
+            for tc in test_cases:
+                if tc.test_id == test_id:
+                    selected_test_case = tc
+                    break
+            if not selected_test_case:
+                raise HTTPException(status_code=404, detail=f"Test case with ID '{test_id}' not found")
+            log_info(f"Step 3: Selected test case by ID: {test_id}", node="complete_automation.step3")
+        else:
+            # Use first test case
+            selected_test_case = test_cases[0]
+            log_info(f"Step 3: Using first test case: {selected_test_case.test_id}", node="complete_automation.step3")
+        
+        # Step 4: Generate Playwright prompt
+        log_info(f"Step 4: Generating Playwright prompt for {selected_test_case.test_id}", node="complete_automation.step4")
+        prompt_result = generator.generate_playwright_prompt(selected_test_case)
+        generated_prompt = prompt_result.generated_prompt
+        
+        if not generated_prompt:
+            raise HTTPException(status_code=500, detail="Failed to generate Playwright prompt")
+        
+        log_info(
+            f"Prompt generated successfully (length: {len(generated_prompt)})",
+            node="complete_automation.step4",
+            extra={"prompt_length": len(generated_prompt)}
+        )
+        
+        # Step 5: Execute Playwright automation
+        log_info(f"Step 5: Executing Playwright automation with {browser_type} browser", node="complete_automation.step5")
+        exec_request = PlaywrightExecutionRequest(
+            test_id=selected_test_case.test_id,
+            generated_prompt=generated_prompt,
+            browser_type=browser_type,
+            headless=headless,
+            max_iterations=max_iterations
+        )
+        
+        full_response = await execute_playwright_automation(exec_request)
+        
+        # Step 6: Extract and return structured JSON with nodes and edges
+        log_info("Step 6: Extracting structured metadata (nodes and edges)", node="complete_automation.step6")
+        result = SimplifiedMetadataResponse(
+            pages=full_response.pages,
+            edges=full_response.edges
+        )
+        
+        log_info(
+            "Complete automation finished successfully",
+            node="complete_automation.success",
+            extra={
+                "test_id": selected_test_case.test_id,
+                "pages_extracted": len(result.pages),
+                "edges_extracted": len(result.edges),
+                "execution_time": full_response.execution_time
+            }
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error(
+            "Error in complete automation from Excel",
+            error=e,
+            extra={"filename": file.filename, "test_id": test_id}
+        )
+        raise HTTPException(status_code=500, detail=f"Error in complete automation: {str(e)}")
+    
+    finally:
+        # Clean up temp file
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+                log_info("Cleaned up temporary Excel file", node="complete_automation.cleanup")
+            except Exception as e:
+                log_error("Failed to clean up temp file", error=e)
 
 
 if __name__ == "__main__":

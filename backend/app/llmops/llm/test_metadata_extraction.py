@@ -25,6 +25,7 @@ def test_metadata_extraction():
     print("=" * 80)
     
     # Test case that will navigate and extract metadata
+    # Browser type is passed dynamically from test case (can be: chromium, firefox, webkit, edge)
     test_case = {
         "test_id": "TC_METADATA_001",
         "module": "Web Navigation",
@@ -35,11 +36,13 @@ def test_metadata_extraction():
             2. Extract page metadata (URL and title)
         """,
         "expected_result": "Complete metadata extracted in structured JSON format",
-        "priority": "High"
+        "priority": "High",
+        "browser_type": "edge"  # Dynamic browser type: chromium, firefox, webkit, or edge
     }
     
     print("\n📤 Sending request to /execute-playwright-from-testcase...")
     print(f"Test ID: {test_case['test_id']}")
+    print(f"Browser Type: {test_case['browser_type']}")
     print(f"Target URL: https://example.com")
     
     try:
@@ -355,7 +358,9 @@ if __name__ == "__main__":
     print("Running Tests...")
     print("=" * 80)
     
-    # Test 1: End-to-end with metadata
+    # Test 1: End-to-end with metadata (using edge browser from test case)
+    print("\n🌐 Test 1 uses browser_type from test case (currently set to 'edge')")
+    print("   Browser type flows: Test Case → API → Agent → Playwright State\n")
     result1 = test_metadata_extraction()
     
     # Test 2: Custom prompt with explicit metadata request
@@ -367,7 +372,8 @@ if __name__ == "__main__":
     print("=" * 80)
     
     if result1:
-        print(f"✅ Test 1: Completed - {len(result1.get('pages', []))} pages extracted")
+        print(f"✅ Test 1 (Edge Browser): Completed - {len(result1.get('pages', []))} pages extracted")
+        print(f"   Browser used: edge (from test_case['browser_type'])")
     else:
         print("❌ Test 1: Failed")
     
@@ -379,4 +385,8 @@ if __name__ == "__main__":
     print("\n" + "=" * 80)
     print("🎉 Testing Complete!")
     print("=" * 80)
-    print("\n💡 Tip: Check 'playwright_metadata_output.json' for full details")
+    print("\n💡 Tips:")
+    print("  - Check 'playwright_metadata_output.json' for full details")
+    print("  - Browser type is dynamic: Change test_case['browser_type'] to test different browsers")
+    print("  - Supported: chromium, firefox, webkit, edge")
+    print("  - Flow: test_case → TestCaseRequest → PlaywrightExecutionRequest → agent.run()")
