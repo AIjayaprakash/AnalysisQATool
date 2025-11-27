@@ -1,8 +1,29 @@
 """Playwright agent system prompts and prompt management"""
 
+from typing import Optional, Tuple
+from ..prompts.prompt_validation_tool import (
+    PromptValidator,
+    PromptValidationConfig,
+    PromptValidationReport,
+    ValidationLevel,
+    quick_validate,
+    sanitize_prompt
+)
+
 
 class PlaywrightAgentPrompts:
-    """Centralized prompts for Playwright automation agent"""
+    """Centralized prompts for Playwright automation agent with validation support"""
+    
+    def __init__(self, enable_validation: bool = True, validation_config: Optional[PromptValidationConfig] = None):
+        """
+        Initialize PlaywrightAgentPrompts with optional validation
+        
+        Args:
+            enable_validation: Whether to enable prompt validation
+            validation_config: Custom validation configuration
+        """
+        self._enable_validation = enable_validation
+        self._validator = PromptValidator(validation_config) if enable_validation else None
     
     @staticmethod
     def get_system_prompt() -> str:
@@ -174,3 +195,173 @@ IMPORTANT: After navigating to each page and before interacting with elements:
             "test completed",
             "execution finished"
         ]
+    
+    # ==================== Prompt Validation Methods ====================
+    
+    def validate_user_prompt(self, prompt: str, metadata: Optional[dict] = None) -> PromptValidationReport:
+        """
+        Validate a user prompt for Playwright automation
+        
+        Args:
+            prompt: The user prompt to validate
+            metadata: Optional metadata about the prompt context
+            
+        Returns:
+            PromptValidationReport with validation results
+            
+        Raises:
+            RuntimeError: If validation is disabled
+        """
+        if not self._enable_validation or not self._validator:
+            raise RuntimeError("Validation is disabled. Enable it during initialization.")
+        
+        return self._validator.validate(prompt, metadata)
+    
+    def get_validated_system_prompt(self, validate: bool = True) -> Tuple[str, Optional[PromptValidationReport]]:
+        """
+        Get system prompt with optional validation
+        
+        Args:
+            validate: Whether to validate the system prompt
+            
+        Returns:
+            Tuple of (system_prompt, validation_report)
+        """
+        system_prompt = self.get_system_prompt()
+        
+        validation_report = None
+        if validate and self._enable_validation and self._validator:
+            validation_report = self._validator.validate(system_prompt, {"type": "system_prompt"})
+            
+            # Use sanitized version if available
+            if validation_report.sanitized_prompt:
+                system_prompt = validation_report.sanitized_prompt
+        
+        return system_prompt, validation_report
+    
+    def format_and_validate_user_prompt(self, test_description: str, validate: bool = True) -> Tuple[str, Optional[PromptValidationReport]]:
+        """
+        Format and validate a user prompt for Playwright automation
+        
+        Args:
+            test_description: Description of the test case to automate
+            validate: Whether to validate the prompt
+            
+        Returns:
+            Tuple of (formatted_prompt, validation_report)
+            
+        Raises:
+            ValueError: If validation fails with critical errors
+        """
+        # Format the user prompt
+        user_prompt = f"""Execute the following test case using Playwright automation:
+
+Test Case: {test_description}
+
+Please:
+1. Navigate to the appropriate website
+2. Extract page metadata after each navigation
+3. Perform the required actions step by step
+4. Take screenshots at key steps
+5. Close the browser when complete
+
+Use the provided tools in the correct format."""
+        
+        validation_report = None
+        if validate and self._enable_validation and self._validator:
+            validation_report = self._validator.validate(user_prompt, {"type": "user_prompt", "test_description": test_description})
+            
+            # Check for critical errors
+            critical_errors = validation_report.get_by_level(ValidationLevel.CRITICAL)
+            if critical_errors:
+                raise ValueError(f"Prompt validation failed with critical errors: {[e.message for e in critical_errors]}")
+            
+            # Use sanitized version if available
+            if validation_report.sanitized_prompt:
+                user_prompt = validation_report.sanitized_prompt
+        
+        return user_prompt, validation_report
+    
+    def quick_validate(self, prompt: str) -> bool:
+        """
+        Quick validation check for a prompt
+        
+        Args:
+            prompt: The prompt to validate
+            
+        Returns:
+            True if prompt is valid, False otherwise
+        """
+        if not self._enable_validation or not self._validator:
+            return True  # If validation disabled, consider valid
+        
+        report = self._validator.validate(prompt)
+        return report.is_valid
+    
+    def sanitize(self, prompt: str) -> str:
+        """
+        Sanitize a prompt by removing dangerous content
+        
+        Args:
+            prompt: The prompt to sanitize
+            
+        Returns:
+            Sanitized prompt
+        """
+        if not self._enable_validation or not self._validator:
+            return prompt  # Return as-is if validation disabled
+        
+        return self._validator._sanitize_prompt(prompt)
+    
+    def enable_validation(self, config: Optional[PromptValidationConfig] = None):
+        """
+        Enable prompt validation
+        
+        Args:
+            config: Optional custom validation configuration
+        """
+        self._enable_validation = True
+        self._validator = PromptValidator(config)
+    
+    def disable_validation(self):
+        """
+        Disable prompt validation
+        """
+        self._enable_validation = False
+        self._validator = None
+    
+    def validate_tool_call_prompt(self, tool_name: str, args: dict, validate: bool = True) -> Tuple[str, Optional[PromptValidationReport]]:
+        """
+        Validate and format a tool call prompt
+        
+        Args:
+            tool_name: Name of the tool
+            args: Tool arguments
+            validate: Whether to validate
+            
+        Returns:
+            Tuple of (formatted_tool_call, validation_report)
+            
+        Raises:
+            ValueError: If validation fails with critical errors
+        """
+        tool_call = self.format_tool_call(tool_name, args)
+        
+        validation_report = None
+        if validate and self._enable_validation and self._validator:
+            # Validate the tool call
+            validation_report = self._validator.validate(
+                tool_call,
+                {"type": "tool_call", "tool_name": tool_name}
+            )
+            
+            # Check for critical errors
+            critical_errors = validation_report.get_by_level(ValidationLevel.CRITICAL)
+            if critical_errors:
+                raise ValueError(f"Tool call validation failed: {[e.message for e in critical_errors]}")
+            
+            # Use sanitized version if available
+            if validation_report.sanitized_prompt:
+                tool_call = validation_report.sanitized_prompt
+        
+        return tool_call, validation_report
