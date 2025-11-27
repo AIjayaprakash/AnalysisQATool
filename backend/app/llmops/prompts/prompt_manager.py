@@ -2,10 +2,19 @@
 Prompt Templates for Test Case Processing
 
 Centralized prompt management with templates for different use cases.
+Includes prompt validation for security and quality assurance.
 """
 
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
+from .prompt_validation_tool import (
+    PromptValidator,
+    PromptValidationConfig,
+    PromptValidationReport,
+    ValidationLevel,
+    quick_validate,
+    sanitize_prompt
+)
 
 
 @dataclass
@@ -18,7 +27,22 @@ class PromptTemplate:
 
 
 class PromptManager:
-    """Manages prompt templates for test case processing"""
+    """
+    Manages prompt templates for test case processing.
+    Includes built-in validation for security and quality.
+    """
+    
+    def __init__(self, enable_validation: bool = True, validation_config: Optional[PromptValidationConfig] = None):
+        """
+        Initialize prompt manager with optional validation.
+        
+        Args:
+            enable_validation: Enable prompt validation (default: True)
+            validation_config: Custom validation configuration
+        """
+        self._enable_validation = enable_validation
+        self._validator = PromptValidator(validation_config) if enable_validation else None
+        self._init_templates()
     
     # System prompt for test case conversion
     TEST_CASE_CONVERSION_SYSTEM = """You are an expert QA automation engineer. Your task is to convert brief test case descriptions into detailed, step-by-step Playwright automation instructions.
@@ -60,8 +84,8 @@ Description: {short_description}
 Additional Context:
 {context}"""
     
-    def __init__(self):
-        """Initialize prompt manager with predefined templates"""
+    def _init_templates(self):
+        """Initialize prompt templates"""
         self.templates: Dict[str, PromptTemplate] = {}
         self._initialize_templates()
     
@@ -148,6 +172,105 @@ Additional Context:
     def list_templates(self) -> list[str]:
         """List all available template names"""
         return list(self.templates.keys())
+    
+    def validate_prompt(self, prompt: str, metadata: Optional[Dict] = None) -> PromptValidationReport:
+        """
+        Validate a prompt for security and quality.
+        
+        Args:
+            prompt: The prompt text to validate
+            metadata: Optional metadata about the prompt
+        
+        Returns:
+            PromptValidationReport with validation results
+        
+        Raises:
+            RuntimeError: If validation is disabled
+        """
+        if not self._enable_validation or not self._validator:
+            raise RuntimeError("Validation is disabled. Enable it during initialization.")
+        
+        return self._validator.validate(prompt, metadata)
+    
+    def format_and_validate_prompt(
+        self, 
+        template_name: str, 
+        validate: bool = True,
+        **kwargs
+    ) -> Tuple[str, str, Optional[PromptValidationReport]]:
+        """
+        Format a prompt from template and optionally validate it.
+        
+        Args:
+            template_name: Name of the template to use
+            validate: Whether to validate the prompts (default: True)
+            **kwargs: Variables to fill in the template
+        
+        Returns:
+            Tuple of (system_prompt, user_prompt, validation_report)
+            validation_report is None if validation is disabled or not requested
+        
+        Raises:
+            ValueError: If validation fails with critical errors
+        """
+        # Format the prompts
+        system_prompt, user_prompt = self.format_prompt(template_name, **kwargs)
+        
+        validation_report = None
+        
+        # Validate if enabled and requested
+        if validate and self._enable_validation and self._validator:
+            # Validate user prompt (system prompt is pre-validated template)
+            validation_report = self._validator.validate(user_prompt)
+            
+            # Check for critical errors
+            critical_errors = validation_report.get_by_level(ValidationLevel.CRITICAL)
+            if critical_errors:
+                error_messages = [e.message for e in critical_errors]
+                raise ValueError(f"Prompt validation failed with critical errors: {error_messages}")
+            
+            # Use sanitized prompt if available
+            if validation_report.sanitized_prompt:
+                user_prompt = validation_report.sanitized_prompt
+        
+        return system_prompt, user_prompt, validation_report
+    
+    def quick_validate(self, prompt: str) -> bool:
+        """
+        Quick validation check for a prompt.
+        
+        Args:
+            prompt: The prompt text to validate
+        
+        Returns:
+            True if valid, False otherwise
+        """
+        if not self._enable_validation:
+            return True
+        
+        return quick_validate(prompt, strict=False)
+    
+    def sanitize(self, prompt: str) -> str:
+        """
+        Sanitize a prompt by removing dangerous content.
+        
+        Args:
+            prompt: The prompt text to sanitize
+        
+        Returns:
+            Sanitized prompt text
+        """
+        return sanitize_prompt(prompt)
+    
+    def enable_validation(self, config: Optional[PromptValidationConfig] = None):
+        """Enable prompt validation with optional custom config"""
+        self._enable_validation = True
+        self._validator = PromptValidator(config)
+    
+    def disable_validation(self):
+        """Disable prompt validation"""
+        self._enable_validation = False
+        self._validator = None
 
 
 # Singleton instance
