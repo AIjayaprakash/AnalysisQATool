@@ -1,0 +1,14 @@
+# Azure SQL Database Requirements
+# Install these packages to connect to Azure SQL Database
+
+# ODBC Driver for SQL Server
+# Main database connector for Azure SQL
+pyodbc==5.0.1
+
+# Python SQL Server driver (alternative)
+# pymssql==2.2.11
+
+# Additional useful packages for database operations
+sqlalchemy==2.0.23  # ORM and connection pooling (optional)
+pandas==2.1.3       # For data analysis (optional)
+python-dotenv==1.0.0  # For environment variable management

@@ -113,37 +113,55 @@ Additional Context:
             raise ValueError(f"Template '{template_name}' not found. Available: {list(self.templates.keys())}")
         return self.templates[template_name]
     
-    def format_prompt(self, template_name: str, **kwargs) -> tuple[str, str]:
+    def format_prompt(self, template_name: str, validate: bool = True, **kwargs) -> tuple[str, str]:
         """
-        Format a prompt template with provided variables
+        Format a prompt template with provided variables and automatic validation.
+        
+        This method now calls format_and_validate_prompt internally to ensure
+        all prompts are validated by default.
         
         Args:
             template_name: Name of the template
+            validate: Whether to validate the prompts (default: True)
             **kwargs: Variables to format the template
             
         Returns:
             Tuple of (system_prompt, user_prompt)
+            
+        Raises:
+            ValueError: If validation fails with critical errors
         """
-        template = self.get_template(template_name)
-        user_prompt = template.user_prompt_template.format(**kwargs)
-        return template.system_prompt, user_prompt
+        # Call format_and_validate_prompt which handles both formatting and validation
+        system_prompt, user_prompt, validation_report = self.format_and_validate_prompt(
+            template_name=template_name,
+            validate=validate,
+            **kwargs
+        )
+        
+        # Return only the prompts (validation_report is handled internally)
+        return system_prompt, user_prompt
     
     def get_test_case_conversion_prompts(
         self, 
         short_description: str,
         test_id: Optional[str] = None,
-        additional_context: Optional[Dict] = None
+        additional_context: Optional[Dict] = None,
+        validate: bool = True
     ) -> tuple[str, str]:
         """
-        Get prompts for test case conversion
+        Get prompts for test case conversion with automatic validation.
         
         Args:
             short_description: Brief test case description
             test_id: Optional test case ID
             additional_context: Optional additional context
+            validate: Whether to validate the prompts (default: True)
             
         Returns:
             Tuple of (system_prompt, user_prompt)
+            
+        Raises:
+            ValueError: If validation fails with critical errors
         """
         if test_id or additional_context:
             # Use template with context
@@ -154,6 +172,7 @@ Additional Context:
             
             return self.format_prompt(
                 "test_case_with_context",
+                validate=validate,
                 test_id=test_id or "N/A",
                 short_description=short_description,
                 context=context_str if context_str else "None"
@@ -162,6 +181,7 @@ Additional Context:
             # Use basic template
             return self.format_prompt(
                 "test_case_conversion",
+                validate=validate,
                 short_description=short_description
             )
     
@@ -200,6 +220,7 @@ Additional Context:
     ) -> Tuple[str, str, Optional[PromptValidationReport]]:
         """
         Format a prompt from template and optionally validate it.
+        This is the core implementation that format_prompt calls internally.
         
         Args:
             template_name: Name of the template to use
@@ -213,8 +234,10 @@ Additional Context:
         Raises:
             ValueError: If validation fails with critical errors
         """
-        # Format the prompts
-        system_prompt, user_prompt = self.format_prompt(template_name, **kwargs)
+        # Get template and format prompts directly (avoid circular call)
+        template = self.get_template(template_name)
+        user_prompt = template.user_prompt_template.format(**kwargs)
+        system_prompt = template.system_prompt
         
         validation_report = None
         

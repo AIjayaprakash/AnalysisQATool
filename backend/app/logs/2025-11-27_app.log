@@ -70,3 +70,71 @@
 2025-11-27 13:07:41,161 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
 2025-11-27 13:07:41,162 - app - INFO - [logger.py:171] - Validating prompt (length: 68)
 2025-11-27 13:07:41,162 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
+2025-11-27 15:52:04,301 - app - INFO - [logger.py:171] - Prompt validator initialized | Extra: {"max_length": 10000, "strict_mode": false}
+2025-11-27 15:52:04,303 - app - INFO - [logger.py:171] - Validating prompt (length: 114)
+2025-11-27 15:52:04,330 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
+2025-11-27 15:52:04,333 - app - INFO - [logger.py:171] - Validating prompt (length: 109)
+2025-11-27 15:52:04,334 - app - INFO - [logger.py:171] - Validation complete: FAILED | Extra: {"is_valid": false, "error_count": 1, "warning_count": 0}
+2025-11-27 15:52:04,335 - app - INFO - [logger.py:171] - Prompt validator initialized | Extra: {"max_length": 10000, "strict_mode": false}
+2025-11-27 15:52:04,336 - app - INFO - [logger.py:171] - Prompt validator initialized | Extra: {"max_length": 10000, "strict_mode": false}
+2025-11-27 15:52:04,337 - app - INFO - [logger.py:171] - Validating prompt (length: 95)
+2025-11-27 15:52:04,338 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
+2025-11-27 15:52:04,339 - app - INFO - [logger.py:171] - Validating prompt (length: 90)
+2025-11-27 15:52:04,340 - app - INFO - [logger.py:171] - Validation complete: FAILED | Extra: {"is_valid": false, "error_count": 1, "warning_count": 0}
+2025-11-27 15:52:04,341 - app - INFO - [logger.py:171] - Prompt validator initialized | Extra: {"max_length": 10000, "strict_mode": false}
+2025-11-27 15:52:04,342 - app - INFO - [logger.py:171] - Validating prompt (length: 80)
+2025-11-27 15:52:04,345 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
+2025-11-27 15:52:04,347 - app - INFO - [logger.py:171] - Validating prompt (length: 95)
+2025-11-27 15:52:04,348 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
+2025-11-27 16:17:51,749 - app - INFO - [logger.py:171] - Prompt validator initialized | Extra: {"max_length": 10000, "strict_mode": false}
+2025-11-27 16:17:51,750 - app - INFO - [logger.py:171] - Validating prompt (length: 135)
+2025-11-27 16:17:51,777 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
+2025-11-27 16:17:51,778 - app - INFO - [logger.py:171] - Prompt validator initialized | Extra: {"max_length": 10000, "strict_mode": false}
+2025-11-27 16:17:51,779 - app - INFO - [logger.py:171] - Validating prompt (length: 56)
+2025-11-27 16:17:51,781 - app - INFO - [logger.py:171] - Validation complete: FAILED | Extra: {"is_valid": false, "error_count": 1, "warning_count": 0}
+2025-11-27 16:17:51,782 - app - INFO - [logger.py:171] - Validating prompt (length: 57)
+2025-11-27 16:17:51,782 - app - INFO - [logger.py:171] - Validation complete: FAILED | Extra: {"is_valid": false, "error_count": 2, "warning_count": 0}
+2025-11-27 16:17:51,784 - app - INFO - [logger.py:171] - Validating prompt (length: 51)
+2025-11-27 16:17:51,785 - app - INFO - [logger.py:171] - Validation complete: FAILED | Extra: {"is_valid": false, "error_count": 0, "warning_count": 0}
+2025-11-27 16:17:51,786 - app - INFO - [logger.py:171] - Validating prompt (length: 32)
+2025-11-27 16:17:51,787 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
+2025-11-27 16:17:51,789 - app - INFO - [logger.py:171] - Prompt validator initialized | Extra: {"max_length": 10000, "strict_mode": false}
+2025-11-27 16:17:51,789 - app - INFO - [logger.py:171] - Prompt validator initialized | Extra: {"max_length": 10000, "strict_mode": false}
+2025-11-27 16:17:51,791 - app - INFO - [logger.py:171] - Validating prompt (length: 161)
+2025-11-27 16:17:51,792 - app - INFO - [logger.py:171] - Validation complete: FAILED | Extra: {"is_valid": false, "error_count": 1, "warning_count": 0}
+2025-11-27 16:17:51,793 - app - INFO - [logger.py:171] - Validating prompt (length: 95)
+2025-11-27 16:17:51,794 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
+2025-11-27 16:17:51,795 - app - INFO - [logger.py:171] - Prompt validator initialized | Extra: {"max_length": 500, "strict_mode": true}
+2025-11-27 16:17:51,796 - app - INFO - [logger.py:171] - Prompt validator initialized | Extra: {"max_length": 10000, "strict_mode": false}
+2025-11-27 16:17:51,796 - app - INFO - [logger.py:171] - Validating prompt (length: 5)
+2025-11-27 16:17:51,799 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 1}
+2025-11-27 16:17:51,800 - app - INFO - [logger.py:171] - Validating prompt (length: 5)
+2025-11-27 16:17:51,801 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 1}
+2025-11-27 16:17:51,802 - app - INFO - [logger.py:171] - Prompt validator initialized | Extra: {"max_length": 10000, "strict_mode": false}
+2025-11-27 16:17:51,803 - app - INFO - [logger.py:171] - Validating prompt (length: 72)
+2025-11-27 16:17:51,804 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
+2025-11-27 16:17:51,805 - app - INFO - [logger.py:171] - Validating prompt (length: 72)
+2025-11-27 16:17:51,806 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
+2025-11-27 16:17:51,807 - app - INFO - [logger.py:171] - Prompt validator initialized | Extra: {"max_length": 10000, "strict_mode": false}
+2025-11-27 16:17:51,807 - app - INFO - [logger.py:171] - Validating prompt (length: 600)
+2025-11-27 16:17:51,808 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
+2025-11-27 16:17:51,808 - app - INFO - [logger.py:171] - Validating prompt (length: 600)
+2025-11-27 16:17:51,811 - app - INFO - [logger.py:171] - Validation complete: FAILED | Extra: {"is_valid": false, "error_count": 1, "warning_count": 0}
+2025-11-27 16:17:51,812 - app - INFO - [logger.py:171] - Prompt validator initialized | Extra: {"max_length": 10000, "strict_mode": false}
+2025-11-27 16:17:51,813 - app - INFO - [logger.py:171] - Validating batch of 5 prompts
+2025-11-27 16:17:51,813 - app - INFO - [logger.py:171] - Validating prompt (length: 47)
+2025-11-27 16:17:51,815 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
+2025-11-27 16:17:51,815 - app - INFO - [logger.py:171] - Validating prompt (length: 42)
+2025-11-27 16:17:51,816 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
+2025-11-27 16:17:51,816 - app - INFO - [logger.py:171] - Validating prompt (length: 49)
+2025-11-27 16:17:51,817 - app - INFO - [logger.py:171] - Validation complete: FAILED | Extra: {"is_valid": false, "error_count": 1, "warning_count": 0}
+2025-11-27 16:17:51,818 - app - INFO - [logger.py:171] - Validating prompt (length: 48)
+2025-11-27 16:17:51,818 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
+2025-11-27 16:17:51,820 - app - INFO - [logger.py:171] - Validating prompt (length: 15000)
+2025-11-27 16:17:51,833 - app - INFO - [logger.py:171] - Validation complete: FAILED | Extra: {"is_valid": false, "error_count": 1, "warning_count": 1}
+2025-11-27 16:17:51,834 - app - INFO - [logger.py:171] - Batch validation complete: 3/5 valid | Extra: {"valid_count": 3, "total": 5}
+2025-11-27 16:17:51,838 - app - INFO - [logger.py:171] - Validating prompt (length: 270)
+2025-11-27 16:17:51,841 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
+2025-11-27 16:17:51,844 - app - INFO - [logger.py:171] - Prompt validator initialized | Extra: {"max_length": 10000, "strict_mode": false}
+2025-11-27 16:17:51,844 - app - INFO - [logger.py:171] - Validating prompt (length: 61)
+2025-11-27 16:17:51,845 - app - INFO - [logger.py:171] - Validation complete: PASSED | Extra: {"is_valid": true, "error_count": 0, "warning_count": 0}
