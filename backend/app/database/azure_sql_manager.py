@@ -103,12 +103,13 @@ class AzureSQLManager:
             
             # Insert test execution
             insert_query = """
+            SET NOCOUNT ON;
             INSERT INTO dbo.TestExecutions (
                 test_id, status, execution_time, steps_executed,
                 agent_output, error_message, executed_at
             )
             VALUES (?, ?, ?, ?, ?, ?, ?);
-            SELECT SCOPE_IDENTITY() AS execution_id;
+            SELECT CAST(SCOPE_IDENTITY() AS INT) AS execution_id;
             """
             
             cursor.execute(
@@ -124,8 +125,9 @@ class AzureSQLManager:
                 )
             )
             
-            result = cursor.fetchone()
-            execution_id = int(result[0]) if result else None
+            # Move to the result set
+            row = cursor.fetchone()
+            execution_id = int(row[0]) if row else None
             
             # Store screenshots
             for screenshot in metadata.get("screenshots", []):
@@ -168,9 +170,10 @@ class AzureSQLManager:
     def _insert_page(self, cursor, execution_id: int, page: Dict) -> Optional[int]:
         """Insert page record and return page_id."""
         query = """
+        SET NOCOUNT ON;
         INSERT INTO dbo.Pages (execution_id, page_node_id, page_label, x_position, y_position)
         VALUES (?, ?, ?, ?, ?);
-        SELECT SCOPE_IDENTITY() AS page_id;
+        SELECT CAST(SCOPE_IDENTITY() AS INT) AS page_id;
         """
         cursor.execute(
             query,
@@ -182,8 +185,8 @@ class AzureSQLManager:
                 page.get("y", 0)
             )
         )
-        result = cursor.fetchone()
-        return int(result[0]) if result else None
+        row = cursor.fetchone()
+        return int(row[0]) if row else None
     
     def _insert_element(self, cursor, page_id: int, element: Dict):
         """Insert page element record."""
@@ -223,6 +226,69 @@ class AzureSQLManager:
                 query,
                 (execution_id, source_id, target_id, edge.get("label", ""))
             )
+    
+    def insert_test_execution(
+        self,
+        test_id: str,
+        status: str,
+        execution_time: float,
+        steps_executed: int,
+        agent_output: Optional[str] = None,
+        error_message: Optional[str] = None,
+        executed_at: Optional[datetime] = None
+    ) -> Optional[int]:
+        """
+        Insert a test execution record.
+        
+        Args:
+            test_id: Unique test identifier
+            status: Execution status (success/failed/error)
+            execution_time: Execution time in seconds
+            steps_executed: Number of steps executed
+            agent_output: Optional agent output
+            error_message: Optional error message
+            executed_at: Optional execution timestamp
+            
+        Returns:
+            execution_id if successful, None otherwise
+        """
+        try:
+            cursor = self.connection.cursor()
+            query = """
+            SET NOCOUNT ON;
+            INSERT INTO dbo.TestExecutions (
+                test_id, status, execution_time, steps_executed,
+                agent_output, error_message, executed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?);
+            SELECT CAST(SCOPE_IDENTITY() AS INT) AS execution_id;
+            """
+            
+            cursor.execute(
+                query,
+                (
+                    test_id,
+                    status,
+                    execution_time,
+                    steps_executed,
+                    agent_output,
+                    error_message,
+                    executed_at or datetime.utcnow()
+                )
+            )
+            
+            row = cursor.fetchone()
+            execution_id = int(row[0]) if row else None
+            
+            self.connection.commit()
+            logger.info(f"Inserted test execution: {test_id} (ID: {execution_id})")
+            return execution_id
+            
+        except Exception as e:
+            logger.error(f"Error inserting test execution: {e}")
+            if self.connection:
+                self.connection.rollback()
+            return None
     
     def get_test_execution(self, execution_id: int) -> Optional[Dict]:
         """Retrieve test execution by ID."""

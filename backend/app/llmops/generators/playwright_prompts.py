@@ -42,8 +42,8 @@ Available Playwright tools:
 - playwright_click(selector, element_description): Click elements on the page
 - playwright_type(selector, text, element_description): Type text into input fields  
 - playwright_screenshot(filename): Take screenshots for documentation
-- playwright_wait_for_selector(selector, timeout): Wait for elements to appear
-- playwright_wait_for_text(text, timeout): Wait for text to appear
+- playwright_wait_for_selector(selector, timeout): Wait for elements to appear (timeout in milliseconds, default 5000)
+- playwright_wait_for_text(text, timeout): Wait for text to appear (timeout in milliseconds, default 5000)
 - playwright_get_page_content(): Get page structure and content
 - playwright_execute_javascript(script): Run JavaScript
 - playwright_get_page_metadata(selector): Extract metadata for page or specific element
@@ -66,6 +66,18 @@ ARGS: {"selector": "button#submit"}
 
 USE_TOOL: playwright_screenshot
 ARGS: {"filename": "step1.png"}
+
+USE_TOOL: playwright_wait_for_selector
+ARGS: {"selector": "button#submit", "timeout": 5000}
+
+USE_TOOL: playwright_wait_for_text
+ARGS: {"text": "Login successful", "timeout": 3000}
+
+IMPORTANT - WAIT STRATEGY:
+- Use short timeouts (3000-5000ms) to avoid long waits
+- If element doesn't appear quickly, check if page loaded correctly
+- Don't wait more than 10000ms (10 seconds) for any element
+- If wait fails, take a screenshot and describe what you see
 
 METADATA EXTRACTION REQUIREMENT:
 IMPORTANT: After navigating to each page and before interacting with elements:
@@ -106,6 +118,8 @@ ARGS: {"arg1": "value1", "arg2": "value2"}"""
         return [
             'USE_TOOL: playwright_navigate\nARGS: {"url": "https://example.com"}',
             'USE_TOOL: playwright_get_page_metadata\nARGS: {"selector": null}',
+            'USE_TOOL: playwright_wait_for_selector\nARGS: {"selector": "button#submit", "timeout": 5000}',
+            'USE_TOOL: playwright_wait_for_text\nARGS: {"text": "Welcome", "timeout": 3000}',
             'USE_TOOL: playwright_click\nARGS: {"selector": "button#submit", "element_description": "Submit button"}',
             'USE_TOOL: playwright_type\nARGS: {"selector": "input#email", "text": "user@example.com", "element_description": "Email field"}',
             'USE_TOOL: playwright_screenshot\nARGS: {"filename": "page_loaded.png"}',
@@ -137,9 +151,12 @@ IMPORTANT: After navigating to each page and before interacting with elements:
         return [
             "ALWAYS start with USE_TOOL: playwright_navigate",
             "After navigation, IMMEDIATELY extract page metadata",
+            "Use playwright_wait_for_selector with SHORT timeouts (3000-5000ms) before clicking",
             "Before interacting with an element, extract its metadata first",
             "Use USE_TOOL format for ALL actions",
             "Take screenshots to document progress",
+            "If wait times out, take screenshot and check page state",
+            "NEVER wait more than 10 seconds for any element",
             "ALWAYS end with USE_TOOL: playwright_close_browser",
             "Work step by step and explain your actions"
         ]
@@ -157,8 +174,8 @@ IMPORTANT: After navigating to each page and before interacting with elements:
             "playwright_click": "Click elements on the page",
             "playwright_type": "Type text into input fields",
             "playwright_screenshot": "Take screenshots for documentation",
-            "playwright_wait_for_selector": "Wait for elements to appear",
-            "playwright_wait_for_text": "Wait for text to appear",
+            "playwright_wait_for_selector": "Wait for elements to appear (timeout in ms, use 3000-5000ms)",
+            "playwright_wait_for_text": "Wait for text to appear (timeout in ms, use 3000-5000ms)",
             "playwright_get_page_content": "Get page structure and content",
             "playwright_execute_javascript": "Run JavaScript",
             "playwright_get_page_metadata": "Extract metadata for page or specific element",

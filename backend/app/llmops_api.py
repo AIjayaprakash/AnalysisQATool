@@ -527,9 +527,9 @@ def parse_metadata_from_output(output: str) -> tuple[List[PageNode], List[Edge]]
     
     # Find page metadata blocks
     page_pattern = r'📄 Page Metadata:\s*\n\s*•\s*URL:\s*([^\n]+)\s*\n\s*•\s*Title:\s*([^\n]+)'
-    page_matches = re.finditer(page_pattern, output, re.MULTILINE)
+    page_matches = list(re.finditer(page_pattern, output, re.MULTILINE))
     
-    for page_match in page_matches:
+    for idx, page_match in enumerate(page_matches):
         url = page_match.group(1).strip()
         title = page_match.group(2).strip()
         
@@ -542,70 +542,104 @@ def parse_metadata_from_output(output: str) -> tuple[List[PageNode], List[Edge]]
         elements = []
         element_counter = 1
         
-        # Look for the element metadata block after this page block
-        element_pattern = r'🎯 Element Metadata \(Found (\d+) element\(s\)\):(.*?)(?=📄 Page Metadata:|✅ playwright_screenshot|✅ playwright_close|$)'
+        # Calculate the search window: from end of current page to start of next page
+        # This ensures we only look for elements belonging to THIS page
         element_search_start = page_match.end()
-        remaining_output = output[element_search_start:element_search_start + 10000]  # Look ahead 10000 chars
         
-        element_match = re.search(element_pattern, remaining_output, re.DOTALL)
+        # Determine the end of search window
+        if idx + 1 < len(page_matches):
+            # If there's a next page, search until the next page metadata starts
+            element_search_end = page_matches[idx + 1].start()
+        else:
+            # If this is the last page, search until end or common termination patterns
+            # Look ahead maximum 10000 chars
+            element_search_end = min(element_search_start + 10000, len(output))
         
+        # Extract the search window for THIS page only
+        search_window = output[element_search_start:element_search_end]
+        
+        # Look for the element metadata block IMMEDIATELY following this page
+        # Must appear before any other page metadata or tool actions
+        element_pattern = r'^(.*?)🎯 Element Metadata \(Found (\d+) element\(s\)\):(.*?)(?=✅ playwright_|$)'
+        element_match = re.search(element_pattern, search_window, re.DOTALL | re.MULTILINE)
+        
+        # Only process elements if they appear immediately (within first 500 chars)
+        # and the pattern is found
         if element_match:
-            elem_count = int(element_match.group(1))
-            elem_block = element_match.group(2)
-            
-            # Split the element block by "Element X:" pattern to get individual elements
-            # Each element section starts with patterns like "Element 1:", "Element 2:", etc.
-            individual_element_pattern = r'(?:Element \d+:|•\s*Selector:)'
-            element_sections = re.split(individual_element_pattern, elem_block)
-            
-            # Process each element section
-            for section in element_sections:
-                if not section.strip():
-                    continue
-                
-                # Extract element attributes from this section
-                tag_match = re.search(r'•\s*Tag:\s*<([^>]+)>', section)
-                type_match = re.search(r'•\s*Type:\s*([^\n]+)', section)
-                text_match = re.search(r'•\s*Text:\s*([^\n]+)', section)
-                id_match = re.search(r'•\s*ID:\s*([^\n]+)', section)
-                name_match = re.search(r'•\s*Name:\s*([^\n]+)', section)
-                class_match = re.search(r'•\s*Class:\s*([^\n]+)', section)
-                href_match = re.search(r'•\s*Href:\s*([^\n]+)', section)
-                input_type_match = re.search(r'•\s*Input Type:\s*([^\n]+)', section)
-                
-                # Skip if no tag found (not a valid element section)
-                if not tag_match:
-                    continue
-                
-                tag = tag_match.group(1).strip()
-                element_type = type_match.group(1).strip() if type_match else tag
-                
-                # Determine element type from tag if not specified
-                if element_type == tag:
-                    if tag == "a":
-                        element_type = "link"
-                    elif tag == "button":
-                        element_type = "button"
-                    elif tag == "input":
-                        element_type = "input"
-                    elif tag == "form":
-                        element_type = "form"
-                
-                element = ElementMetadata(
-                    id=f"element_{element_counter}",
-                    type=element_type,
-                    tag=tag,
-                    text=text_match.group(1).strip() if text_match and text_match.group(1).strip() not in ["None", "null", ""] else None,
-                    element_id=id_match.group(1).strip() if id_match and id_match.group(1).strip() not in ["None", "null", ""] else None,
-                    name=name_match.group(1).strip() if name_match and name_match.group(1).strip() not in ["None", "null", ""] else None,
-                    class_name=class_match.group(1).strip() if class_match and class_match.group(1).strip() not in ["None", "null", ""] else None,
-                    href=href_match.group(1).strip() if href_match and href_match.group(1).strip() not in ["None", "null", ""] else None,
-                    input_type=input_type_match.group(1).strip() if input_type_match and input_type_match.group(1).strip() not in ["None", "null", ""] else None,
-                    depends_on=[]
+            # Check if Element metadata appears reasonably close to Page metadata
+            prefix = element_match.group(1)
+            # If there's too much content before Element metadata, it's probably not related
+            if len(prefix.strip()) > 500:
+                # Skip - Element metadata is too far from Page metadata
+                log_warning(
+                    f"Skipping Element metadata for page '{title}' - too far from Page metadata",
+                    node="parse_metadata",
+                    extra={"page_title": title, "distance": len(prefix.strip())}
                 )
+            else:
+                elem_count = int(element_match.group(2))
+                elem_block = element_match.group(3)
                 
-                elements.append(element)
-                element_counter += 1
+                # Split the element block by "Element X:" pattern to get individual elements
+                # Each element section starts with patterns like "Element 1:", "Element 2:", etc.
+                individual_element_pattern = r'(?:Element \d+:|•\s*Selector:)'
+                element_sections = re.split(individual_element_pattern, elem_block)
+                
+                # Process each element section
+                for section in element_sections:
+                    if not section.strip():
+                        continue
+                    
+                    # Extract element attributes from this section
+                    tag_match = re.search(r'•\s*Tag:\s*<([^>]+)>', section)
+                    type_match = re.search(r'•\s*Type:\s*([^\n]+)', section)
+                    text_match = re.search(r'•\s*Text:\s*([^\n]+)', section)
+                    id_match = re.search(r'•\s*ID:\s*([^\n]+)', section)
+                    name_match = re.search(r'•\s*Name:\s*([^\n]+)', section)
+                    class_match = re.search(r'•\s*Class:\s*([^\n]+)', section)
+                    href_match = re.search(r'•\s*Href:\s*([^\n]+)', section)
+                    input_type_match = re.search(r'•\s*Input Type:\s*([^\n]+)', section)
+                    
+                    # Skip if no tag found (not a valid element section)
+                    if not tag_match:
+                        continue
+                    
+                    tag = tag_match.group(1).strip()
+                    element_type = type_match.group(1).strip() if type_match else tag
+                    
+                    # Determine element type from tag if not specified
+                    if element_type == tag:
+                        if tag == "a":
+                            element_type = "link"
+                        elif tag == "button":
+                            element_type = "button"
+                        elif tag == "input":
+                            element_type = "input"
+                        elif tag == "form":
+                            element_type = "form"
+                    
+                    element = ElementMetadata(
+                        id=f"element_{element_counter}",
+                        type=element_type,
+                        tag=tag,
+                        text=text_match.group(1).strip() if text_match and text_match.group(1).strip() not in ["None", "null", ""] else None,
+                        element_id=id_match.group(1).strip() if id_match and id_match.group(1).strip() not in ["None", "null", ""] else None,
+                        name=name_match.group(1).strip() if name_match and name_match.group(1).strip() not in ["None", "null", ""] else None,
+                        class_name=class_match.group(1).strip() if class_match and class_match.group(1).strip() not in ["None", "null", ""] else None,
+                        href=href_match.group(1).strip() if href_match and href_match.group(1).strip() not in ["None", "null", ""] else None,
+                        input_type=input_type_match.group(1).strip() if input_type_match and input_type_match.group(1).strip() not in ["None", "null", ""] else None,
+                        depends_on=[]
+                    )
+                    
+                    elements.append(element)
+                    element_counter += 1
+        else:
+            # No Element metadata found for this page - this is OK, just log it
+            log_info(
+                f"No Element metadata found for page '{title}' - creating page without elements",
+                node="parse_metadata",
+                extra={"page_title": title, "url": url}
+            )
         
         # Create page node
         page_node = PageNode(
